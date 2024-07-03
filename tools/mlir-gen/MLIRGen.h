@@ -74,6 +74,12 @@ class MLIRGenerator {
   /// Lower softmax at the last layer
   bool enableSoftmax;
 
+  /// List of linalg output Op kind which can be generated
+  enum class OutputOpKind { Generic, NamedOp };
+
+  /// Kind of linalg output Op to be generated
+  OutputOpKind outputOpKind;
+
   /// List of supported kernel types that can be generated
   ///  * Const: Generates weights and biases as constant (RO).
   ///  * Args: Generates weights and biaseds as arguments (RW).
@@ -98,6 +104,9 @@ class MLIRGenerator {
 
   /// Return a zero-init tensor for matmul outputs
   Value getZeroInitTensor(TensorType);
+
+  /// Computes required flops
+  void computeFlops(ShapedType inputShape, ShapedType outputShape);
 
   /// Affine expressions for maps
   SmallVector<AffineExpr, 6> affineExprs;
@@ -132,20 +141,32 @@ class MLIRGenerator {
   /// Returns the chain value to be used in the next op
   Value lowerMatmul(Value, Value, Value);
 
+  /// Creates linalg named matmul
+  Value lowerNamedMatmul(Value, Value, Value);
+
   /// Creates a bias add in the current function
   /// Args: Input, Output (same for in-place)
   /// Returns the chain value to be used in the next op
   Value lowerBiasAdd(Value, Value, Value);
+
+  /// Creates linalg named bias add
+  Value lowerNamedBiasAdd(Value, Value, Value);
 
   /// Creates a relu in the current function
   /// Args: Input, Output (same for in-place)
   /// Returns the chain value to be used in the next op
   Value lowerRelu(Value, Value);
 
+  /// Creates linalg named relu
+  Value lowerNamedRelu(Value, Value);
+
   /// Creates a softmax in the current function
   /// Args: Input, Output (same for in-place)
   /// Returns the chain value to be used in the next op
   Value lowerSoftmax(Value, Value);
+
+  /// Creates linalg named softmax
+  Value lowerNamedSoftmax(Value, Value);
 
   // ============================ Main API
 
@@ -189,8 +210,8 @@ public:
   /// Creates a specific module. Different configurations need different modules
   /// so should create new objects to not have to share / cleanup existing MLIR
   /// modules.
-  MLIRGenerator(StringRef, unsigned, StringRef, StringRef, StringRef, int, bool,
-                bool, bool, int);
+  MLIRGenerator(StringRef, StringRef, unsigned, StringRef, StringRef, StringRef,
+                int, bool, bool, bool, int);
 
   ~MLIRGenerator() { module->destroy(); }
 
