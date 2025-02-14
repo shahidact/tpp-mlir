@@ -1,11 +1,14 @@
-// RUN: not --crash tpp-run %s -e entry -entry-point-result=void -mattr=amx-bf16 2>&1 | FileCheck %s --check-prefix=CHECK-AMX-BF16
+// RUN: not --crash env LIBXSMM_TARGET=spr tpp-run %s -e entry -entry-point-result=void -mattr=-amx-bf16 2>&1 | FileCheck %s --check-prefix=CHECK-AMX-BF16
 // RUN: not --crash env LIBXSMM_TARGET=spr tpp-run %s -e entry -entry-point-result=void -mattr=amx-bf16 2>&1 | FileCheck %s --check-prefix=CHECK-AMX-BF16-SETUP
 
-//Tests for unsuccessfull compilation implying AMX pipeline was not initialized
-// CHECK-AMX-BF16: error: LLVM Translation failed for operation: builtin.unrealized_conversion_cast
+//Tests for unsuccessfull compilation in absence of 'amx-bf16' feature
+// CHECK-AMX-BF16: LLVM ERROR: Cannot select: intrinsic %llvm.x86.tdpbf16ps.internal
 
-//Tests for successfull compilation implying AMX pipeline was initialized properly.
-// CHECK-AMX-BF16-SETUP-NOT: error: LLVM Translation failed for operation: builtin.unrealized_conversion_cast
+//Tests for successfull compilation in presence of 'amx-bf16' but fails to run due to unsupported instruction.
+// CHECK-AMX-BF16-SETUP-NOT: LLVM ERROR: Cannot select: intrinsic %llvm.x86.tdpbf16ps.internal
+// CHECK-AMX-BF16-SETUP: Illegal instruction
+
+
 func.func @entry(%arg0: memref<16x32xbf16>,
              %arg1: memref<16x32xbf16>,
              %arg2: memref<16x16xf32>) {
