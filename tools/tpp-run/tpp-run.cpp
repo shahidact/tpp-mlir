@@ -272,6 +272,7 @@ int main(int argc, char **argv) {
     return 1;
 
   // Initialize the underlying platform
+  // TODO: Move this to use the target information flags
   libxsmm_init();
   // Initialize the LLVM machinery
   llvm::InitLLVM y(argc, argv);

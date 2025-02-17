@@ -189,7 +189,7 @@ private:
 
     // Lower to LLVM
     ConvertVectorToLLVMPassOptions options;
-    options.amx = vnni::utils::hasAMX() ? true : false;
+    options.amx = vnni::utils::hasAMX();
     pm.addPass(createConvertVectorToLLVMPass(options));
     pm.addPass(createFinalizeMemRefToLLVMConversionPass());
     pm.addPass(createConvertSCFToCFPass());
