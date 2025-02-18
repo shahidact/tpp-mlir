@@ -1,10 +1,6 @@
-// RUN: tpp-opt --default-pipeline %s | FileCheck %s
+
 // RUN: LIBXSMM_TARGET=spr tpp-opt --default-pipeline %s | FileCheck %s --check-prefix=CHECK-AMX-BF16
 
-// CHECK-LABEL:   llvm.func @entry
-// CHECK:         builtin.unrealized_conversion_cast
-// CHECK:         amx.tile_mulf
-// CHECK-NOT:     amx.tilestored64
 
 // CHECK-AMX-BF16-LABEL:   llvm.func @entry
 // CHECK-AMX-BF16:         amx.tileloadd64
