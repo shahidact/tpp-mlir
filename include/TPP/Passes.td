@@ -88,6 +88,18 @@ def VectorContractToFMA : Pass<
                            "arith::ArithDialect"];
 }
 
+def VectorContractToAMX : Pass<
+    "vector-contract-to-amx"> {
+  let summary = "Perform vector amx lowering of vector contraction ops";
+  let dependentDialects = ["memref::MemRefDialect",
+                           "scf::SCFDialect",
+                           "tensor::TensorDialect",
+                           "vector::VectorDialect",
+                           "arith::ArithDialect",
+                           "amx::AMXDialect",
+                           "x86vector::X86VectorDialect"];
+}
+
 
 def BrgemmLinalgTiling : Pass<"tile-brgemm-linalg"> {
   let summary = "Tile bregmm  matmul and reduction dimension.";
