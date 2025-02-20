@@ -9,6 +9,7 @@
 #ifndef TPP_PASSES_H
 #define TPP_PASSES_H
 
+#include "mlir/Dialect/AMX/AMXDialect.h"
 #include "mlir/Pass/Pass.h"
 
 namespace mlir {
@@ -95,6 +96,10 @@ class XsmmDialect;
 namespace xegpu {
 class XeGPUDialect;
 } // namespace xegpu
+
+namespace amx {
+class AMXDialect;
+} // namespace amx
 
 namespace x86vector {
 class X86VectorDialect;
