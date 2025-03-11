@@ -68,7 +68,10 @@ if [ "${BENCHMARK_NUM_ITER}" ]; then
 fi
 
 # Build
-eval "${SCRIPT_DIR}/github/build_tpp.sh"
+"${SCRIPT_DIR}/github/build_tpp.sh"
+if [ "$?" != 0 ]; then
+  exit 1
+fi
 
 # Benchmark
 benchmark () {
