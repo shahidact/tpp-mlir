@@ -52,7 +52,6 @@ private:
   void constructPipeline() override {
     pm.addNestedPass<func::FuncOp>(createBF16DotProduct());
     pm.addNestedPass<func::FuncOp>(createHoistVectorTransfers());
-    // pm.addNestedPass<func::FuncOp>(createCanonicalizerPass());
     if (vnni::utils::hasAMX())
       pm.addNestedPass<func::FuncOp>(createVectorContractToAMX());
     pm.addNestedPass<func::FuncOp>(createCanonicalizerPass());
