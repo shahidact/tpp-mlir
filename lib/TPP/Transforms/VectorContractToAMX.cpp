@@ -19,6 +19,7 @@
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/Dialect/X86Vector/X86VectorDialect.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/MLIRContext.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
@@ -37,35 +38,30 @@ using namespace mlir::tpp;
 namespace {
 /// Returns true if the \p map is transposed.
 static bool isTransposed(AffineMap map) {
-  auto results = map.getResults();
+  auto numInputDims = map.getNumInputs();
   // Assert if the map does not have 4 or 5 inputs ([] m, n, k).
-  assert((map.getNumInputs() == 4 || map.getNumInputs() == 5) &&
+  assert((numInputDims == 4 || numInputDims == 5) &&
          "4 or 5 input dim expected");
   // Assert if the result is not 2D.
   assert(map.getNumResults() == 2 && "Only 2 output dim expected");
 
   // Check the last two dimensions for transposition.
+  auto results = map.getResults();
   auto dimExpr0 = dyn_cast<AffineDimExpr>(results[0]);
   auto dimExpr1 = dyn_cast<AffineDimExpr>(results[1]);
   assert((dimExpr0 && dimExpr1) && "Unexpected dim expression");
 
+  MLIRContext *context = map.getContext();
+  auto mDim = mlir::getAffineDimExpr(numInputDims - 3, context);
+  auto nDim = mlir::getAffineDimExpr(numInputDims - 2, context);
+  auto kDim = mlir::getAffineDimExpr(numInputDims - 1, context);
   // Exclude output map result.
-  bool isOutputResultMap =
-      dimExpr0 ==
-          mlir::getAffineDimExpr(map.getNumInputs() - 3, map.getContext()) &&
-      dimExpr1 ==
-          mlir::getAffineDimExpr(map.getNumInputs() - 2, map.getContext());
-  assert(!isOutputResultMap && "Output result map not expected");
+  if ((dimExpr0 != mDim) && (dimExpr1 != nDim))
+    return false;
 
   // It's transposed if result found as (k, m) or (n, k), else not transposed.
-  if ((dimExpr0 ==
-           mlir::getAffineDimExpr(map.getNumInputs() - 1, map.getContext()) &&
-       dimExpr1 ==
-           mlir::getAffineDimExpr(map.getNumInputs() - 3, map.getContext())) ||
-      (dimExpr0 ==
-           mlir::getAffineDimExpr(map.getNumInputs() - 2, map.getContext()) &&
-       dimExpr1 ==
-           mlir::getAffineDimExpr(map.getNumInputs() - 1, map.getContext())))
+  if ((dimExpr0 == kDim && dimExpr1 == mDim) ||
+      (dimExpr0 == nDim && dimExpr1 == kDim))
     return true;
   return false;
 }
@@ -120,34 +116,34 @@ static scf::ForOp getOutermostLoopWithIterargAccumulator(scf::ForOp loop,
 
 // Verifies that the accumulator is coming through a chain of iterargs of nested
 // loop and it is define by 'TransferReadOp'.
-static LogicalResult verifyAccumulator(vector::ContractionOp op,
+static LogicalResult verifyAccumulator(PatternRewriter &rewriter,
+                                       vector::ContractionOp op,
                                        mlir::tpp::TransformationContext &ctx,
                                        Value &acc,
                                        vector::TransferReadOp &accDefiningOp) {
 
   ctx.innerForOp = op->getParentOfType<scf::ForOp>();
   if (!ctx.innerForOp)
-    return failure();
+    return rewriter.notifyMatchFailure(op, "Inner loop not found");
 
-  ctx.outerForOp = ctx.innerForOp->getParentOfType<scf::ForOp>();
   // Verify original inner loop has only one iterarg.
   auto origIterArgs = ctx.innerForOp.getRegionIterArgs();
   if (origIterArgs.size() != 1)
-    return failure();
+    return rewriter.notifyMatchFailure(op, "Exactly one iterarg expected");
 
   // Verify chain, accumulator must be inner loop's iterarg.
   auto bbArg = dyn_cast<BlockArgument>(acc);
-  if (!bbArg)
-    return failure();
 
   // This block arg must be init arg, not induction variable.
-  if (bbArg.getOwner() != ctx.innerForOp.getBody() || bbArg.getArgNumber() == 0)
-    return failure();
+  if (bbArg && ((bbArg.getOwner() != ctx.innerForOp.getBody()) ||
+                (bbArg.getArgNumber() == 0)))
+    return rewriter.notifyMatchFailure(op, "Accumulator is not an iterarg");
 
   // This iterarg must be intialized by outer loop's iterarg.
   auto innerInitValue = ctx.innerForOp.getInitArgs()[bbArg.getArgNumber() - 1];
   auto outerBBArg = dyn_cast<BlockArgument>(innerInitValue);
-  acc = ctx.outerForOp && hasIterArg(ctx.outerForOp) &&
+  ctx.outerForOp = ctx.innerForOp->getParentOfType<scf::ForOp>();
+  acc = outerBBArg && ctx.outerForOp && hasIterArg(ctx.outerForOp) &&
                 containsIterArg(innerInitValue, ctx.outerForOp)
             ? ctx.outerForOp.getInitArgs()[outerBBArg.getArgNumber() - 1]
             : innerInitValue;
@@ -155,12 +151,13 @@ static LogicalResult verifyAccumulator(vector::ContractionOp op,
   //  This must be defined by vector.transfer_read
   accDefiningOp = acc.getDefiningOp<vector::TransferReadOp>();
   if (!accDefiningOp)
-    return failure();
+    return rewriter.notifyMatchFailure(op,
+                                       "Accumulator intializer did not match");
 
   // Only 2-D output expected.
   auto accType = cast<ShapedType>(accDefiningOp.getType());
   if (accType.getRank() != 2)
-    return failure();
+    return rewriter.notifyMatchFailure(op, "Only 2-D output is expected");
 
   return success();
 }
@@ -322,7 +319,7 @@ struct VectorContractToAMXPattern
       return rewriter.notifyMatchFailure(
           op, "Transposed matrices are not expected");
 
-    if (failed(verifyAccumulator(op, ctx, acc, accDefiningOp)))
+    if (failed(verifyAccumulator(rewriter, op, ctx, acc, accDefiningOp)))
       return rewriter.notifyMatchFailure(
           op, "Failed to verify accumulator and loop structure\n");
 
