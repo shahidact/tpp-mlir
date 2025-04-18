@@ -1,4 +1,4 @@
-//===--------------- VectorContractToAMX.cpp ------------*- C++-*-===//
+//===- VectorContractToAMX.cpp ----------------------------------*- C++ -*-===//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -60,10 +60,8 @@ static bool isTransposed(AffineMap map) {
     return false;
 
   // It's transposed if result found as (k, m) or (n, k), else not transposed.
-  if ((dimExpr0 == kDim && dimExpr1 == mDim) ||
-      (dimExpr0 == nDim && dimExpr1 == kDim))
-    return true;
-  return false;
+  return (dimExpr0 == kDim && dimExpr1 == mDim) ||
+         (dimExpr0 == nDim && dimExpr1 == kDim);
 }
 } // namespace
 
@@ -79,6 +77,52 @@ struct TransformationContext {
 
 enum class MatMulType { Standard, Batch, BatchReduce };
 
+/// This pass lowers vector.contract (linalg.batch_reduce_matmul) for bf16
+/// type into sequence of amx.tile_load, amx.tile_mulf, amx.tile_store along
+/// with the required up-convert and down-convert.
+///
+/// As an example, the following pseudo-code will be rewritten
+/// scf.for // m-tile
+///  scf.for // n-tile
+///   subview // C matrix
+///   scf.for // batch-reduce
+///   scf.for // k-tile
+///    subview // A and B matrix
+///    vector.read // A, B, and C matrix
+///    vector.contract
+///    vector.write // to C matrix
+///
+/// to:
+///
+/// scf.for // m-tile
+///  scf.for // n-tile
+///
+///   // allocate local buffer for result accumulation in <32x32xf32>
+///   memref.alloca
+///
+///   // Up-convert C matrix and copy to local buffer
+///   vector.transfer_read
+///   vector.bitcast + arith.extsi + arith.shli + vector.bitcast
+///   vector.transfer_write
+///
+///   // load tiles of <16x16xf32> from local buffer
+///   amx.tile_load // 4 loads, pass them as iterargs
+///
+///   scf.for (iterargs = loaded tiles) // batch-reduce
+///    scf.for (iterargs = batch-reduce iterArgs) // k-tile
+///     amx.load // 2 loads from A matrix
+///     amx.load // 2 loads from B matrix
+///     amx.tile_mulf // 4 multiply and accumulate in <32x32xf32>
+///     scf.yield
+///   scf.yield
+///   amx.tile_store // store back into local buffer
+///
+///   // Down-convert local buffer and store back to C matrix
+///   vector.transfer_read
+///   x86vector.avx512.intr.cvtneps2bf16.512
+///   vector.transfer_write
+///  .............
+///  ............
 struct VectorContractToAMX
     : public tpp::impl::VectorContractToAMXBase<VectorContractToAMX> {
 
@@ -114,6 +158,14 @@ static scf::ForOp getOutermostLoopWithIterargAccumulator(scf::ForOp loop,
   return outermostLoop;
 }
 
+static bool hasUserWriteOp(Value matResult) {
+  for (auto user : matResult.getUsers()) {
+    if (isa<vector::TransferWriteOp>(user))
+      return true;
+  }
+  return false;
+}
+
 // Verifies that the accumulator is coming through a chain of iterargs of nested
 // loop and it is define by 'TransferReadOp'.
 static LogicalResult verifyAccumulator(PatternRewriter &rewriter,
@@ -143,6 +195,14 @@ static LogicalResult verifyAccumulator(PatternRewriter &rewriter,
   auto innerInitValue = ctx.innerForOp.getInitArgs()[bbArg.getArgNumber() - 1];
   auto outerBBArg = dyn_cast<BlockArgument>(innerInitValue);
   ctx.outerForOp = ctx.innerForOp->getParentOfType<scf::ForOp>();
+
+  Value matResult = ctx.outerForOp && hasIterArg(ctx.outerForOp)
+                        ? ctx.outerForOp.getResult(0)
+                        : ctx.innerForOp.getResult(0);
+  if (!hasUserWriteOp(matResult))
+    return rewriter.notifyMatchFailure(
+        op, "Store of accumulated result is not found");
+
   acc = outerBBArg && ctx.outerForOp && hasIterArg(ctx.outerForOp) &&
                 containsIterArg(innerInitValue, ctx.outerForOp)
             ? ctx.outerForOp.getInitArgs()[outerBBArg.getArgNumber() - 1]
@@ -181,22 +241,23 @@ static Value collapseInnerDims(OpBuilder &builder, mlir::Location loc,
 }
 
 // Helper to create collapse_shape and tile_load ops for the input tiles.
-static SmallVector<Value, 4>
-createTileLoads(OpBuilder &builder, Location loc,
-                amx::TileType amxInputTilesOf16x32xBf16Ty, Value subview,
-                int mSize, Value c0, bool isLHS = true) {
+static SmallVector<Value, 4> createTileLoads(OpBuilder &builder, Location loc,
+                                             amx::TileType resType,
+                                             Value subview, int dimSize,
+                                             Value c0, bool isLHS = true) {
   SmallVector<Value, 4> loadTiles;
-
-  for (int i = 0; i < mSize; i += 16) {
-    auto lhsIndex = isLHS ? builder.create<arith::ConstantIndexOp>(loc, i) : c0;
-    auto rhsIndex = isLHS ? c0 : builder.create<arith::ConstantIndexOp>(loc, i);
+  // Choose step for the considered amx tile type <16x32xbf16> for A and B
+  // matrix.
+  unsigned dimStep = isLHS ? 16 : 32;
+  for (int i = 0; i < dimSize; i += dimStep) {
+    auto mIndex = isLHS ? builder.create<arith::ConstantIndexOp>(loc, i) : c0;
+    auto nIndex = isLHS ? c0 : builder.create<arith::ConstantIndexOp>(loc, i);
     auto subviewType = cast<ShapedType>(subview.getType());
     auto subviewRank = subviewType.getRank();
     auto collapsedOpnd =
         collapseInnerDims(builder, loc, subview, subviewRank - 2);
-    auto elem = builder.create<amx::TileLoadOp>(
-        loc, amxInputTilesOf16x32xBf16Ty, collapsedOpnd,
-        ValueRange{c0, lhsIndex, rhsIndex});
+    auto elem = builder.create<amx::TileLoadOp>(loc, resType, collapsedOpnd,
+                                                ValueRange{c0, mIndex, nIndex});
     loadTiles.push_back(elem);
   }
   return loadTiles;
@@ -204,7 +265,7 @@ createTileLoads(OpBuilder &builder, Location loc,
 
 // Helper to create tile mul ops for the input tiles.
 static SmallVector<Value> createTileMuls(OpBuilder &builder, Location loc,
-                                         amx::TileType amxTile16x16xF32Ty,
+                                         amx::TileType resType,
                                          SmallVector<Value, 4> aLoadTiles,
                                          SmallVector<Value, 4> bLoadTiles,
                                          ValueRange iterArgs) {
@@ -212,9 +273,8 @@ static SmallVector<Value> createTileMuls(OpBuilder &builder, Location loc,
   int numIterArgs = 0;
   for (unsigned i = 0; i < aLoadTiles.size(); i++) {
     for (unsigned j = 0; j < bLoadTiles.size(); j++) {
-      auto amx = builder.create<amx::TileMulFOp>(loc, amxTile16x16xF32Ty,
-                                                 aLoadTiles[i], bLoadTiles[j],
-                                                 iterArgs[numIterArgs++]);
+      auto amx = builder.create<amx::TileMulFOp>(
+          loc, resType, aLoadTiles[i], bLoadTiles[j], iterArgs[numIterArgs++]);
       results.push_back(amx);
     }
   }
@@ -261,8 +321,9 @@ struct VectorContractToAMXPattern
       return rewriter.notifyMatchFailure(op, "Not a gemm");
     }
 
-    if (matmulType == MatMulType::Batch)
-      return rewriter.notifyMatchFailure(op, "Batch matmul not supported");
+    if (matmulType == MatMulType::Batch || matmulType == MatMulType::Standard)
+      return rewriter.notifyMatchFailure(op,
+                                         "Standard/Batch matmul not supported");
 
     if (iteratorTypes[outerDimIndex] != vector::IteratorType::parallel ||
         iteratorTypes[outerDimIndex + 1] != vector::IteratorType::parallel ||
@@ -294,6 +355,10 @@ struct VectorContractToAMXPattern
     if (!vnni::utils::isInVnniLayout(expectedRank, lhsType) ||
         !vnni::utils::isInVnniLayout(expectedRank, rhsType))
       return rewriter.notifyMatchFailure(op, "Expects VNNI layout");
+
+    auto vnniFactor = vnni::utils::getVnniBlockingFactor(rhsType);
+    if (vnniFactor != 2)
+      return rewriter.notifyMatchFailure(op, "Unexpected VNNI factor");
 
     if (matmulType == MatMulType::BatchReduce &&
         (lhsType.getRank() != 4 || rhsType.getRank() != 4))
@@ -432,10 +497,11 @@ struct VectorContractToAMXPattern
           innerIv);
       auto rhsClone = innerBuilder.clone(
           *rhsDefiningOp.getSource().getDefiningOp(), rhsMapping);
-      // Load matrix B tile
+      // Load matrix B tile, vnni factor and N tile size will be collapsed as
+      // effective tilse size.
       SmallVector<Value, 4> bLoadTiles =
           createTileLoads(innerBuilder, loc, amxInputTilesOf16x32xBf16Ty,
-                          rhsClone->getResult(0), N, c0, false);
+                          rhsClone->getResult(0), N * vnniFactor, c0, false);
 
       // Create MxN/16x16 different AMXs TileMulFOp.
       results = createTileMuls(innerBuilder, loc, amxTile16x16xF32Ty,
@@ -458,6 +524,9 @@ struct VectorContractToAMXPattern
     };
 
     scf::ForOp newOuterForOp;
+    // Single iteration outer loop may have been optimized out due to the
+    // register blocking factor. If the outer loop is not optimized out, we need
+    // to create a new outer.
     if (ctx.outerForOp && hasIterArg(ctx.outerForOp)) {
       // Create new outer loop with M/blocking-factor different accumulators.
       newOuterForOp = rewriter.create<scf::ForOp>(
