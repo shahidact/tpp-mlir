@@ -50,7 +50,10 @@ struct VectorToKernel : public tpp::impl::VectorToKernelBase<VectorToKernel>,
 
 private:
   void constructPipeline() override {
-    pm.addNestedPass<func::FuncOp>(createBF16DotProduct());
+    // TODO: Pass ordering based on target architecture needs to be defined. For
+    // now, allow non AMX target to go through "createBF16DotProduct" pass.
+    if (!vnni::utils::hasAMX())
+      pm.addNestedPass<func::FuncOp>(createBF16DotProduct());
     pm.addNestedPass<func::FuncOp>(createHoistVectorTransfers());
     if (vnni::utils::hasAMX())
       pm.addNestedPass<func::FuncOp>(createVectorContractToAMX());

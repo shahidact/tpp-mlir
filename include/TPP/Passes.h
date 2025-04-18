@@ -9,7 +9,6 @@
 #ifndef TPP_PASSES_H
 #define TPP_PASSES_H
 
-#include "mlir/Dialect/AMX/AMXDialect.h"
 #include "mlir/Pass/Pass.h"
 
 namespace mlir {

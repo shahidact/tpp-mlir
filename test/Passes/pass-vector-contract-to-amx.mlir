@@ -103,6 +103,10 @@ module {
 
 // -----
 
+#map = affine_map<(d0, d1, d2, d3, d4) -> (d0, d2, d4, d1)>
+#map1 = affine_map<(d0, d1, d2, d3, d4) -> (d0, d4, d3, d1)>
+#map2 = affine_map<(d0, d1, d2, d3, d4) -> (d2, d3)>
+
 memref.global "private" constant @__constant_16x32x64x2xbf16 : memref<16x32x64x2xbf16> = dense<1.000000e+00> {alignment = 64 : i64}
 func.func @entry(%arg0: memref<4x16x64x64xbf16>) -> memref<4x16x64x64xbf16> {
   %cst = arith.constant 0.000000e+00 : bf16
@@ -129,7 +133,7 @@ func.func @entry(%arg0: memref<4x16x64x64xbf16>) -> memref<4x16x64x64xbf16> {
             %subview_4 = memref.subview %0[%arg5, %arg7, %arg4, 0] [1, 16, 32, 2] [1, 1, 1, 1] : memref<16x32x64x2xbf16> to memref<1x16x32x2xbf16, strided<[4096, 128, 2, 1], offset: ?>>
             %4 = vector.transfer_read %subview_3[%c0, %c0, %c0, %c0], %cst {in_bounds = [true, true, true, true]} : memref<1x64x16x2xbf16, strided<[4096, 64, 2, 1], offset: ?>>, vector<1x64x16x2xbf16>
             %5 = vector.transfer_read %subview_4[%c0, %c0, %c0, %c0], %cst {in_bounds = [true, true, true, true]} : memref<1x16x32x2xbf16, strided<[4096, 128, 2, 1], offset: ?>>, vector<1x16x32x2xbf16>
-            %6 = vector.contract {indexing_maps = [affine_map<(d0, d1, d2, d3, d4) -> (d0, d2, d4, d1)>, affine_map<(d0, d1, d2, d3, d4) -> (d0, d4, d3, d1)>, affine_map<(d0, d1, d2, d3, d4) -> (d2, d3)>], iterator_types = ["reduction", "reduction", "parallel", "parallel", "reduction"], kind = #vector.kind<add>} %4, %5, %arg8 : vector<1x64x16x2xbf16>, vector<1x16x32x2xbf16> into vector<64x32xbf16>
+            %6 = vector.contract {indexing_maps = [#map, #map1, #map2], iterator_types = ["reduction", "reduction", "parallel", "parallel", "reduction"], kind = #vector.kind<add>} %4, %5, %arg8 : vector<1x64x16x2xbf16>, vector<1x16x32x2xbf16> into vector<64x32xbf16>
             scf.yield %6 : vector<64x32xbf16>
           }
           scf.yield %3 : vector<64x32xbf16>
