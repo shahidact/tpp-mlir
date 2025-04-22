@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - 'main'
+  schedule:
+    # Runs every week to keep the AWS node working
+    - cron: '0 0 * * 5'
   # Disabling pull request for now, problems with repo secrets
   # pull_request:
 
