@@ -96,6 +96,10 @@ namespace xegpu {
 class XeGPUDialect;
 } // namespace xegpu
 
+namespace amx {
+class AMXDialect;
+} // namespace amx
+
 namespace x86vector {
 class X86VectorDialect;
 } // namespace x86vector
