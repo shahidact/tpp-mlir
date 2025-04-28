@@ -594,10 +594,9 @@ struct VectorContractToAMXPattern
                     loc, VectorType::get({16}, bufferType.getElementType()),
                     accBuffer, ValueRange{iv, innerIv}, f0, ArrayRef{true});
                 // Covert
-                auto cvtF32ToBf16 =
-                    rewriter.create<mlir::x86vector::CvtNeF32ToBF16Ps512IntrOp>(
-                        loc, VectorType::get({16}, accType.getElementType()),
-                        readC);
+                auto cvtF32ToBf16 = rewriter.create<arith::TruncFOp>(
+                    loc, VectorType::get({16}, accType.getElementType()),
+                    readC);
                 // Write
                 rewriter
                     .create<vector::TransferWriteOp>(

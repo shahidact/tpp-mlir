@@ -43,7 +43,7 @@ module {
 // CHECK-COUNT-4:     amx.tile_mulf
 // CHECK:             amx.tile_store
 // CHECK:             vector.transfer_read
-// CHECK:             x86vector.avx512.intr.cvtneps2bf16.512
+// CHECK:             arith.truncf
 // CHECK:             vector.transfer_write
 
 // -----
@@ -98,7 +98,7 @@ module {
 // CHECK-COUNT-4:     amx.tile_mulf
 // CHECK:             amx.tile_store
 // CHECK:             vector.transfer_read
-// CHECK:             x86vector.avx512.intr.cvtneps2bf16.512
+// CHECK:             arith.truncf
 // CHECK:             vector.transfer_write
 
 // -----
@@ -152,5 +152,5 @@ func.func @entry(%arg0: memref<4x16x64x64xbf16>) -> memref<4x16x64x64xbf16> {
 // CHECK-COUNT-8:     amx.tile_mulf
 // CHECK:             amx.tile_store
 // CHECK:             vector.transfer_read
-// CHECK:             x86vector.avx512.intr.cvtneps2bf16.512
+// CHECK:             arith.truncf
 // CHECK:             vector.transfer_write
