@@ -1,3 +1,5 @@
+// REQUIRES: target=x86{{.*}}
+
 // RUN: tpp-opt %s  --vector-contract-to-amx --split-input-file | FileCheck %s
 
 
