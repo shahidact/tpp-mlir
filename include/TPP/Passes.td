@@ -86,6 +86,10 @@ def VectorContractToFMA : Pass<
                            "tensor::TensorDialect",
                            "vector::VectorDialect",
                            "arith::ArithDialect"];
+  let options = [
+         Option<"targetFeature", "target-feature", "std::string", "\"none\"",
+                "Target feature of a given architecture">,
+  ];
 }
 
 def VectorContractToAMX : Pass<
