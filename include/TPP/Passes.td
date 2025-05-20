@@ -538,7 +538,7 @@ def TppRunnerWrapper : Pass<"tpp-runner-wrapper", "ModuleOp">{
            "Kernel target device backend (cpu, cuda, intel).">,
     Option<"wrapperCpuTargetFeature", "target-feature", "std::string",
             /*default=*/"",
-           "CPU target feature (avx512, avx2, avx, sse).">,
+           "CPU target feature (avx, avx2, avx512).">,
     Option<"offloadToDevice", "offload-on-device", "bool",
             /*default=*/"true",
            "Offload kernel arguments to the target device.">,
