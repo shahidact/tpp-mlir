@@ -21,6 +21,7 @@
 
 namespace mlir {
 namespace tpp {
+#define GEN_PASS_DECL_VECTORCONTRACTTOFMA
 #define GEN_PASS_DEF_VECTORCONTRACTTOFMA
 #include "TPP/Passes.h.inc"
 } // namespace tpp

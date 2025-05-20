@@ -141,12 +141,38 @@ llvm::cl::opt<std::string>
     defGpuBackend("gpu", llvm::cl::desc("Target GPU backend for lowering"),
                   llvm::cl::value_desc("cuda,intel"), llvm::cl::init(""));
 
+// Select target CPU feature for the pipeline.
+llvm::cl::opt<std::string> runnerCpuTargetFeature(
+    "target-feature", llvm::cl::desc("Specify CPU target feature for lowering"),
+    llvm::cl::value_desc("avx, avx2, avx512"), llvm::cl::init(""));
+
 // Kernel buffers - arguments and return values - are expected to be allocated
 // on GPU.
 llvm::cl::opt<bool>
     defGpuArgs("gpu-args",
                llvm::cl::desc("Kernel buffers are allocated on GPU"),
                llvm::cl::init(true));
+
+struct TargetMachineOptions {
+  StringRef triple;
+  StringRef cpu;
+  StringRef features;
+};
+
+/// Returns the target machine options for the given CPU feature string.
+/// Does not include full support for all CPU features, only the ones that are
+/// relevant for now.
+TargetMachineOptions getTargetMachineOptions(StringRef option) {
+  return StringSwitch<TargetMachineOptions>(option)
+      .Case("avx", {"x86_64-linux-gnu", "sandybridge", "+avx"})
+      .Case("avx2", {"x86_64-linux-gnu", "haswell", "+avx2"})
+      .Case("avx512f", {"x86_64-linux-gnu", "skylake", "+avx512f"})
+      .Case("avx512vnni", {"x86_64-linux-gnu", "znver4", "+avx512vnni"})
+      .Case("neon", {"armv8a-linux-gnu", "cortex-a53", "+neon"})
+      .Case("sve", {"armv8a-linux-gnu", "a64fx", "+sve"})
+      .Case("testfeature", {"x86_64-linux-gnu", "sandybridge", "+testfeature"})
+      .Default({"", "", ""});
+}
 
 // This function will be called by the pass manager after parsing,
 // so we can modify the IR with the needed wrappers
@@ -167,6 +193,7 @@ static LogicalResult prepareMLIRKernel(Operation *op,
   wrapperOpts.kernelName = options.mainFuncName;
   wrapperOpts.kernelType = options.mainFuncType;
   wrapperOpts.backend = defGpuBackend;
+  wrapperOpts.wrapperCpuTargetFeature = runnerCpuTargetFeature;
   wrapperOpts.offloadToDevice = defGpuArgs;
   wrapperOpts.numBenchLoops = benchNumLoops;
   // Warmup on GPUs are currently breaking buffer allocation on GPUs
@@ -177,7 +204,8 @@ static LogicalResult prepareMLIRKernel(Operation *op,
   wrapperOpts.initType = initType;
   passManager.addPass(tpp::createTppRunnerWrapper(wrapperOpts));
 
-  tpp::DefaultPipelineOptions defPipelineOpts{defGpuBackend};
+  tpp::DefaultPipelineOptions defPipelineOpts{defGpuBackend,
+                                              runnerCpuTargetFeature};
   passManager.addPass(tpp::createDefaultPipeline(defPipelineOpts));
 
   auto result = passManager.run(module);
@@ -217,10 +245,14 @@ std::unique_ptr<llvm::Module> lowerToLLVMIR(Operation *module,
     llvm::TargetOptions targetOptions;
     targetOptions.UnsafeFPMath = true;
     targetOptions.AllowFPOpFusion = llvm::FPOpFusion::FPOpFusionMode::Fast;
+    TargetMachineOptions targetMachineOptStr =
+        getTargetMachineOptions(runnerCpuTargetFeature);
     targetMachine.reset(target->createTargetMachine(
-        llvm::Triple(triple), cpuName, "+" + fpuName, targetOptions,
+        llvm::Triple(targetMachineOptStr.triple), targetMachineOptStr.cpu,
+        targetMachineOptStr.features, targetOptions,
         /* reloc model */ std::nullopt,
         /* code model */ std::nullopt, codeGenOpt));
+
     if (!targetMachine) {
       llvm::errs() << "Error while looking up target CPU: ";
       llvm::errs() << cpuName << "\n";

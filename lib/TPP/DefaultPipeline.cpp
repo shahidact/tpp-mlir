@@ -159,6 +159,7 @@ private:
       tppDefaultOptions.registerBlocking =
           SmallVector<unsigned>{registerBlocking.begin(), registerBlocking.end()};
       tppDefaultOptions.vectorToKernel = vectorToKernel;
+      tppDefaultOptions.defBundleCpuTargetFeature = pipelineCpuTargetFeature;
 
       pm.addPass(createDefaultTppPasses(tppDefaultOptions));
     }
