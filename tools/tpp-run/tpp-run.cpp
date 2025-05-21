@@ -109,7 +109,9 @@ llvm::cl::opt<std::string>
 // Select target CPU feature for the pipeline.
 llvm::cl::opt<std::string> runnerCpuTargetFeature(
     "target-feature", llvm::cl::desc("Specify CPU target feature for lowering"),
-    llvm::cl::value_desc("avx, avx2, avx512"), llvm::cl::init(""));
+    llvm::cl::value_desc("avx, avx2, avx512f, avx512vnni, avx512bf16, amx, "
+                         "amx_bf16, amx_tile, neon, sve"),
+    llvm::cl::init(""));
 
 // Kernel buffers - arguments and return values - are expected to be allocated
 // on GPU.
@@ -145,8 +147,12 @@ TargetMachineOptions getTargetMachineOptions(StringRef option) {
   return StringSwitch<TargetMachineOptions>(option)
       .Case("avx", {"x86_64-linux-gnu", "sandybridge", "+avx"})
       .Case("avx2", {"x86_64-linux-gnu", "haswell", "+avx2"})
-      .Case("avx512f", {"x86_64-linux-gnu", "skylake", "+avx512f"})
+      .Case("avx512f", {"x86_64-linux-gnu", "skylake-avx512", "+avx512f"})
       .Case("avx512vnni", {"x86_64-linux-gnu", "znver4", "+avx512vnni"})
+      .Case("avx512bf16", {"x86_64-linux-gnu", "cooperlake", "+avx512bf16"})
+      .Case("amx", {"x86_64-linux-gnu", "sapphirerapids", "+amx"})
+      .Case("amx_bf16", {"x86_64-linux-gnu", "sapphirerapids", "+amx_bf16"})
+      .Case("amx_tile", {"x86_64-linux-gnu", "sapphirerapids", "+amx_tile"})
       .Case("neon", {"armv8a-linux-gnu", "cortex-a53", "+neon"})
       .Case("sve", {"armv8a-linux-gnu", "a64fx", "+sve"})
       .Case("testfeature", {"x86_64-linux-gnu", "sandybridge", "+testfeature"})
