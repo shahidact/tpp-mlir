@@ -103,6 +103,10 @@ def VectorContractToFMA : Pass<
                            "tensor::TensorDialect",
                            "vector::VectorDialect",
                            "arith::ArithDialect"];
+  let options = [
+         Option<"targetFeature", "target-feature", "std::string", "",
+                "Target feature for a given architecture">,
+  ];
 }
 
 def VectorContractToAMX : Pass<
@@ -532,6 +536,9 @@ def TppRunnerWrapper : Pass<"tpp-runner-wrapper", "ModuleOp">{
     Option<"backend", "backend", "std::string",
             /*default=*/"\"cpu\"",
            "Kernel target device backend (cpu, cuda, intel).">,
+    Option<"wrapperCpuTargetFeature", "target-feature", "std::string",
+            /*default=*/"",
+           "CPU target feature (avx, avx2, avx512f, avx512vnni, avx512bf16, amx, amx_bf16, amx_tile, neon, sve).">,
     Option<"offloadToDevice", "offload-on-device", "bool",
             /*default=*/"true",
            "Offload kernel arguments to the target device.">,

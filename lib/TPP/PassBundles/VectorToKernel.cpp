@@ -35,6 +35,8 @@ namespace tpp {
 // specialized micro-kernels akin to libxsmm kernels.
 struct VectorToKernel : public tpp::impl::VectorToKernelBase<VectorToKernel>,
                     PassBundle<ModuleOp> {
+  using VectorToKernelBase::VectorToKernelBase;
+
   void runOnOperation() override {
     auto module = getOperation();
 
@@ -59,6 +61,8 @@ private:
     if (vnni::utils::hasAMX())
       pm.addNestedPass<func::FuncOp>(createVectorContractToAMX());
     pm.addNestedPass<func::FuncOp>(createCanonicalizerPass());
-    pm.addNestedPass<func::FuncOp>(createVectorContractToFMA());
+    VectorContractToFMAOptions options;
+    options.targetFeature = vecBundleCpuTargetFeature;
+    pm.addNestedPass<func::FuncOp>(createVectorContractToFMA(options));
   }
 };
