@@ -8,11 +8,8 @@
 // This file implements lowering of vector contraction to vector fma.
 //
 //===----------------------------------------------------------------------===//
-<<<<<<< HEAD
 
 #include "TPP/Passes.h"
-=======
->>>>>>> 7d6873d9 (Support optimal vector lowering for avx2 target feature.)
 #include "TPP/Transforms/Transforms.h"
 #include "TPP/Transforms/Utils/VNNIUtils.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -28,7 +25,6 @@
 
 namespace mlir {
 namespace tpp {
-#define GEN_PASS_DECL_VECTORCONTRACTTOFMA
 #define GEN_PASS_DEF_VECTORCONTRACTTOFMA
 #include "TPP/Passes.h.inc"
 } // namespace tpp
@@ -272,17 +268,13 @@ struct VectorContractToFMAPattern
     if (K != 1)
       return failure();
 
-<<<<<<< HEAD
-    auto accSubview = accDefiningOp.getBase();
-=======
     unsigned vecLen = getTargetVectorLengthForFP32(options.targetFeature);
     if (vecLen == 0)
       return failure();
 
     SmallVector<Value, 12> results;
     SmallVector<Value, 12> argResults;
-    auto accSubview = accDefiningOp.getSource();
->>>>>>> 7d6873d9 (Support optimal vector lowering for avx2 target feature.)
+    auto accSubview = accDefiningOp.getBase();
     Location loc = op.getLoc();
 
     // Create M different <1xN> subviews.
@@ -368,13 +360,7 @@ struct VectorContractToFMAPattern
                 // Create Mx(N/vecLen) different FMAs using broadcasts and
                 // current accumulator values.
                 auto rhsClone = innerBuilder.clone(
-<<<<<<< HEAD
                     *rhsDefiningOp.getBase().getDefiningOp(), rhsMapping);
-                auto rowVec = innerBuilder.create<vector::LoadOp>(
-                    loc, VectorType::get({N}, elementType),
-                    rhsClone->getResult(0), ValueRange{c0, c0, c0});
-=======
-                    *rhsDefiningOp.getSource().getDefiningOp(), rhsMapping);
                 if (vecLen == 8) {
                   for (unsigned j = 0; j < N; j += vecLen) {
                     auto rowVec = innerBuilder.create<vector::LoadOp>(
@@ -392,7 +378,6 @@ struct VectorContractToFMAPattern
                       argResults.push_back(fma);
                     }
                   }
->>>>>>> 7d6873d9 (Support optimal vector lowering for avx2 target feature.)
 
                   // Perform strided circular copy of elements from argResults
                   // to results.
