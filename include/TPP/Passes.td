@@ -633,4 +633,22 @@ def GpuVectorize : Pass<"gpu-vectorize", "ModuleOp"> {
                            "vector::VectorDialect"];
 }
 
+def RegisterBlocking : Pass<"register-blocking", "func::FuncOp"> {
+  let summary = "Block ops for register sizes.";
+  let description = [{
+    Tile, fuse, and post-process ops to bring them to hardware-friendly
+    shapes in preparation for vectorization.
+  }];
+  let dependentDialects = ["scf::SCFDialect",
+                           "tensor::TensorDialect",
+                           "linalg::LinalgDialect",
+                           "math::MathDialect",
+                           "affine::AffineDialect",
+                           "arith::ArithDialect"];
+  let options = [
+    ListOption<"blocks", "blocks", "int64_t",
+               "Block sizes for the innermost dims: [M, N, K]">
+  ];
+}
+
 #endif // TPP_DIALECT_TPP_PASSES
