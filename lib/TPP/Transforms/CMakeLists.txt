@@ -32,6 +32,7 @@ add_mlir_library(TPPTransforms
   VectorContractToFMA.cpp
   VectorContractToBF16DotProduct.cpp
   VectorContractToAMX.cpp
+  VectorContractToMicroKernels.cpp
   RegisterBlocking.cpp
   LinalgVectorize.cpp
   VectorDropUnitDims.cpp
