@@ -78,6 +78,7 @@ struct LinalgVectorize
     tensor::populateFoldTensorSubsetIntoVectorTransferPatterns(patterns);
     patterns.add<linalg::CopyVectorizationPattern>(ctx);
     vector::populateVectorStepLoweringPatterns(patterns);
+    vector::populateFoldArithExtensionPatterns(patterns);
 
     if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
       return signalPassFailure();
