@@ -129,7 +129,7 @@ static SmallVector<Value> initializeAccumulators(OpBuilder &rewriter,
                                                  Location loc, Value buffer,
                                                  Type accElementType, int64_t m,
                                                  int64_t n) {
-  SmallVector<Value, 4> initAccs;
+  SmallVector<Value> initAccs;
   auto amxTile16x16xF32Ty = mlir::amx::TileType::get({16, 16}, accElementType);
   for (auto mIndices = 0; mIndices < m; mIndices += 16) {
     for (auto nIndices = 0; nIndices < n; nIndices += 16) {
