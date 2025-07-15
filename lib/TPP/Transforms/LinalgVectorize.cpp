@@ -53,7 +53,14 @@ struct VectorizationPattern : public RewritePattern {
     if (isa<tensor::InsertSliceOp>(op))
       return rewriter.notifyMatchFailure(op,
                                          "Insert slice vectorization disabled");
-    return linalg::vectorize(rewriter, op);
+
+    auto vectorizeResult = linalg::vectorize(rewriter, op);
+    if (failed(vectorizeResult))
+            return failure();
+
+    rewriter.replaceOp(op, vectorizeResult->replacements);
+
+    return success();
   }
 };
 
