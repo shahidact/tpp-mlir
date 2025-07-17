@@ -41,8 +41,12 @@ namespace {
 static void downConvertAndCopyResult(OpBuilder &rewriter, Location loc,
                                      Value src, Value dst,
                                      MemRefType bufferType, ShapedType accType,
-                                     Value c0, Value mBound, Value nBound,
-                                     Value one, Value sixteen) {
+                                     int64_t m, int64_t n) {
+  auto c0 = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+  auto one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+  auto sixteen = rewriter.create<arith::ConstantIndexOp>(loc, 16);
+  auto mBound = rewriter.create<arith::ConstantIndexOp>(loc, m);
+  auto nBound = rewriter.create<arith::ConstantIndexOp>(loc, n);
   rewriter.create<scf::ForOp>(
       loc, c0, mBound, one, ValueRange{},
       [&](OpBuilder &nestedBuilder, Location loc, Value iv,
@@ -54,8 +58,8 @@ static void downConvertAndCopyResult(OpBuilder &rewriter, Location loc,
               auto elementType = bufferType.getElementType();
               FloatType floatType = cast<FloatType>(elementType);
               Value f0 = rewriter.create<arith::ConstantFloatOp>(
-                  loc, APFloat::getZero(floatType.getFloatSemantics()),
-                  floatType);
+                  loc, floatType,
+                  APFloat::getZero(floatType.getFloatSemantics()));
               // Read
               auto readC = rewriter.create<vector::TransferReadOp>(
                   loc, VectorType::get({16}, bufferType.getElementType()), src,
@@ -81,9 +85,13 @@ static void downConvertAndCopyResult(OpBuilder &rewriter, Location loc,
 static void upConvertAndCopyAccumulator(OpBuilder &rewriter, Location loc,
                                         Value src, Value dst,
                                         Type inputElementType,
-                                        Type outputElementType, Value c0,
-                                        Value mBound, Value nBound, Value one,
-                                        Value sixteen) {
+                                        Type outputElementType, int64_t m,
+                                        int64_t n) {
+  auto c0 = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+  auto one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+  auto sixteen = rewriter.create<arith::ConstantIndexOp>(loc, 16);
+  auto mBound = rewriter.create<arith::ConstantIndexOp>(loc, m);
+  auto nBound = rewriter.create<arith::ConstantIndexOp>(loc, n);
   rewriter.create<scf::ForOp>(
       loc, c0, mBound, one, ValueRange{},
       [&](OpBuilder &nestedBuilder, Location loc, Value iv,
@@ -92,10 +100,14 @@ static void upConvertAndCopyAccumulator(OpBuilder &rewriter, Location loc,
             loc, c0, nBound, sixteen, iterArgs,
             [&](OpBuilder &innerBuilder, Location loc, Value innerIv,
                 ValueRange innerIterArgs) {
+              FloatType floatType = cast<FloatType>(inputElementType);
+              Value f0 = rewriter.create<arith::ConstantFloatOp>(
+                  loc, floatType,
+                  APFloat::getZero(floatType.getFloatSemantics()));
               // Read
               auto readC = rewriter.create<vector::TransferReadOp>(
                   loc, VectorType::get({16}, inputElementType), src,
-                  ValueRange{iv, innerIv}, ArrayRef{true});
+                  ValueRange{iv, innerIv}, f0, ArrayRef{true});
               auto bitcastLoad = rewriter.create<vector::BitCastOp>(
                   loc, VectorType::get({16}, rewriter.getI16Type()), readC);
               // Convert
@@ -520,10 +532,10 @@ struct VectorContractToAMXPattern
     Value c0 = rewriter.create<arith::ConstantIndexOp>(loc, 0);
 
     // Up Convert and copy the original accumulator to the buffer.
-    auto one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
-    auto sixteen = rewriter.create<arith::ConstantIndexOp>(loc, 16);
-    auto mBound = rewriter.create<arith::ConstantIndexOp>(loc, M);
-    auto nBound = rewriter.create<arith::ConstantIndexOp>(loc, N);
+    // auto one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+    // auto sixteen = rewriter.create<arith::ConstantIndexOp>(loc, 16);
+    // auto mBound = rewriter.create<arith::ConstantIndexOp>(loc, M);
+    // auto nBound = rewriter.create<arith::ConstantIndexOp>(loc, N);
 
     // Intialize each accumulator with a tileType of size 16x16
     Type accElementType;
@@ -541,8 +553,8 @@ struct VectorContractToAMXPattern
 
       // Up Convert and copy the original accumulator to the buffer.
       upConvertAndCopyAccumulator(rewriter, loc, accSubview, accBuffer,
-                                  accType.getElementType(), accElementType, c0,
-                                  mBound, nBound, one, sixteen);
+                                  accType.getElementType(), accElementType, M,
+                                  N);
     }
     initAccs = initializeAccumulators(
         rewriter, loc, outputElementType.isBF16() ? accBuffer : accSubview,
@@ -667,7 +679,7 @@ struct VectorContractToAMXPattern
     // Down convert and copy the result back to the result matrix.
     if (outputElementType.isBF16()) {
       downConvertAndCopyResult(rewriter, loc, accBuffer, accSubview, bufferType,
-                               accType, c0, mBound, nBound, one, sixteen);
+                               accType, M, N);
     }
 
     // Erase original write.
