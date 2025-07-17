@@ -57,14 +57,17 @@ unsigned getVnniBlockingFactor(Type type, Operation *op) {
   unsigned blockingFactor = 0;
 
   auto elementType = getElementTypeOrSelf(type);
-  if (elementType.isBF16()) {
+  if (elementType.isBF16() || elementType.isInteger(8)) {
     // Check if a VNNI factor hint is associated to the IR via DLTI.
     auto vnniValue = dlti::utils::query(op, {"CPU", "vnni"});
     if (succeeded(vnniValue)) {
       if (auto intAttr = llvm::dyn_cast<IntegerAttr>(*vnniValue))
         blockingFactor = intAttr.getInt();
     } else {
-      blockingFactor = libxsmm_cpuid_dot_pack_factor(LIBXSMM_DATATYPE_BF16);
+      blockingFactor =
+          elementType.isBF16()
+              ? libxsmm_cpuid_dot_pack_factor(LIBXSMM_DATATYPE_BF16)
+              : libxsmm_cpuid_dot_pack_factor(LIBXSMM_DATATYPE_I8);
     }
   }
 
@@ -177,7 +180,8 @@ bool isInVnniLayout(VnniOperandRank expectedRank, ShapedType shape,
 
 bool isInVnniLayout(int64_t expectedRank, ShapedType shape,
                     std::optional<unsigned> blockingFactor) {
-  if (shape.getRank() != expectedRank || !shape.getElementType().isBF16())
+  if (shape.getRank() != expectedRank ||
+      !(shape.getElementType().isBF16() || shape.getElementType().isInteger(8)))
     return false;
 
   auto vnniDim = shape.getShape().back();

@@ -39,7 +39,7 @@ namespace {
 // Helper function to down convert and copy the result back to the output
 // matrix.
 static void downConvertAndCopyResult(OpBuilder &rewriter, Location loc,
-                                     Value accBuffer, Value accSubview,
+                                     Value src, Value dst,
                                      MemRefType bufferType, ShapedType accType,
                                      Value c0, Value mBound, Value nBound,
                                      Value one, Value sixteen) {
@@ -58,16 +58,16 @@ static void downConvertAndCopyResult(OpBuilder &rewriter, Location loc,
                   floatType);
               // Read
               auto readC = rewriter.create<vector::TransferReadOp>(
-                  loc, VectorType::get({16}, bufferType.getElementType()),
-                  accBuffer, ValueRange{iv, innerIv}, f0, ArrayRef{true});
+                  loc, VectorType::get({16}, bufferType.getElementType()), src,
+                  ValueRange{iv, innerIv}, f0, ArrayRef{true});
               // Convert
               auto cvtF32ToBf16 = rewriter.create<arith::TruncFOp>(
                   loc, VectorType::get({16}, accType.getElementType()), readC);
               // Write
               rewriter
-                  .create<vector::TransferWriteOp>(
-                      loc, cvtF32ToBf16, accSubview, ValueRange{iv, innerIv},
-                      ArrayRef{true})
+                  .create<vector::TransferWriteOp>(loc, cvtF32ToBf16, dst,
+                                                   ValueRange{iv, innerIv},
+                                                   ArrayRef{true})
                   .getResult();
 
               innerBuilder.create<scf::YieldOp>(loc);
@@ -79,7 +79,7 @@ static void downConvertAndCopyResult(OpBuilder &rewriter, Location loc,
 
 // Helper function to up-convert and copy the accumulator.
 static void upConvertAndCopyAccumulator(OpBuilder &rewriter, Location loc,
-                                        Value accSubview, Value accBuffer,
+                                        Value src, Value dst,
                                         Type inputElementType,
                                         Type outputElementType, Value c0,
                                         Value mBound, Value nBound, Value one,
@@ -94,7 +94,7 @@ static void upConvertAndCopyAccumulator(OpBuilder &rewriter, Location loc,
                 ValueRange innerIterArgs) {
               // Read
               auto readC = rewriter.create<vector::TransferReadOp>(
-                  loc, VectorType::get({16}, inputElementType), accSubview,
+                  loc, VectorType::get({16}, inputElementType), src,
                   ValueRange{iv, innerIv}, ArrayRef{true});
               auto bitcastLoad = rewriter.create<vector::BitCastOp>(
                   loc, VectorType::get({16}, rewriter.getI16Type()), readC);
@@ -113,9 +113,8 @@ static void upConvertAndCopyAccumulator(OpBuilder &rewriter, Location loc,
                   loc, VectorType::get({16}, rewriter.getF32Type()),
                   shiftLeft16bit);
               // Write
-              rewriter.create<vector::TransferWriteOp>(loc, bitcast, accBuffer,
-                                                       ValueRange{iv, innerIv},
-                                                       ArrayRef{true});
+              rewriter.create<vector::TransferWriteOp>(
+                  loc, bitcast, dst, ValueRange{iv, innerIv}, ArrayRef{true});
               innerBuilder.create<scf::YieldOp>(loc);
             });
 
@@ -465,12 +464,14 @@ struct VectorContractToAMXPattern
     auto lhsType = cast<ShapedType>(lhsDefiningOp.getType());
     auto rhsType = cast<ShapedType>(rhsDefiningOp.getType());
     auto expectedRank = matmulType == MatMulType::BatchReduce ? 4 : 3;
+
     if (!vnni::utils::isInVnniLayout(expectedRank, lhsType) ||
         !vnni::utils::isInVnniLayout(expectedRank, rhsType))
       return rewriter.notifyMatchFailure(op, "Expects VNNI layout");
 
     auto vnniFactor = vnni::utils::getVnniBlockingFactor(rhsType);
-    if (vnniFactor != 2)
+
+    if (vnniFactor != 2 && vnniFactor != 4)
       return rewriter.notifyMatchFailure(op, "Unexpected VNNI factor");
 
     if (matmulType == MatMulType::BatchReduce &&
@@ -551,8 +552,9 @@ struct VectorContractToAMXPattern
     auto amxTile16x16xF32Ty =
         mlir::amx::TileType::get({16, 16}, accElementType);
     auto inputTileElemType = lhsType.getElementType();
-    auto amxInputTilesOf16x32xBf16Ty =
-        mlir::amx::TileType::get({16, 32}, inputTileElemType);
+    auto amxInputTilesOf16xColxTy =
+        mlir::amx::TileType::get({16, 16 * vnniFactor}, inputTileElemType);
+
     // Lamda to create inner loop body.
     auto createLoopBody = [&](OpBuilder &innerBuilder, Location loc, Value iv,
                               Value innerIv, ValueRange innerIterArgs) {
@@ -570,7 +572,7 @@ struct VectorContractToAMXPattern
           *lhsDefiningOp.getBase().getDefiningOp(), mapping);
       // Load matrix A tile
       SmallVector<Value, 4> aLoadTiles =
-          createTileLoads(innerBuilder, loc, amxInputTilesOf16x32xBf16Ty,
+          createTileLoads(innerBuilder, loc, amxInputTilesOf16xColxTy,
                           lhsClone->getResult(0), M, c0, true);
 
       IRMapping rhsMapping;
@@ -588,7 +590,7 @@ struct VectorContractToAMXPattern
       // Load matrix B tile, vnni factor and N tile size will be collapsed as
       // effective tilse size.
       SmallVector<Value, 4> bLoadTiles =
-          createTileLoads(innerBuilder, loc, amxInputTilesOf16x32xBf16Ty,
+          createTileLoads(innerBuilder, loc, amxInputTilesOf16xColxTy,
                           rhsClone->getResult(0), N * vnniFactor, c0, false);
 
       // Create MxN/16x16 different AMXs TileMulFOp.
