@@ -201,3 +201,63 @@ func.func @entry(%arg0: memref<8x32x32x32xbf16>, %arg1: memref<2x32x16x32x2xbf16
 // CHECK-COUNT-1:     amx.tile_load
 // CHECK-COUNT-4:     amx.tile_mulf
 // CHECK-COUNT-4:    amx.tile_store
+
+// -----
+
+// This tests shows the lowering of a mixed precision vector.contract
+// (i8 x i8 -> i32) to AMX dialect.
+func.func @entry(%arg0: memref<4x16x64x64xi8>, %arg1: memref<16x16x16x64x4xi8>, %arg2: memref<4x16x64x64xi32>) {
+  %c0_i32 = arith.constant 0 : i32
+  %c0_i8 = arith.constant 0 : i8
+  %c1 = arith.constant 1 : index
+  %c16 = arith.constant 16 : index
+  %c64 = arith.constant 64 : index
+  %c0 = arith.constant 0 : index
+  %expand_shape = memref.expand_shape %arg0 [[0], [1], [2], [3, 4]] output_shape [4, 16, 64, 16, 4] : memref<4x16x64x64xi8> into memref<4x16x64x16x4xi8>
+  scf.forall (%arg3, %arg4) in (4, 16) {
+    %subview = memref.subview %expand_shape[%arg3, 0, 0, 0, 0] [1, 16, 64, 16, 4] [1, 1, 1, 1, 1] : memref<4x16x64x16x4xi8> to memref<16x64x16x4xi8, strided<[4096, 64, 4, 1], offset: ?>>
+    %subview_0 = memref.subview %arg1[%arg4, 0, 0, 0, 0] [1, 16, 16, 64, 4] [1, 1, 1, 1, 1] : memref<16x16x16x64x4xi8> to memref<16x16x64x4xi8, strided<[4096, 256, 4, 1], offset: ?>>
+    %subview_1 = memref.subview %arg2[%arg3, %arg4, 0, 0] [1, 1, 64, 64] [1, 1, 1, 1] : memref<4x16x64x64xi32> to memref<64x64xi32, strided<[64, 1], offset: ?>>
+    scf.for %arg5 = %c0 to %c64 step %c64 {
+      scf.for %arg6 = %c0 to %c64 step %c64 {
+        %subview_2 = memref.subview %subview_1[%arg5, %arg6] [64, 64] [1, 1] : memref<64x64xi32, strided<[64, 1], offset: ?>> to memref<64x64xi32, strided<[64, 1], offset: ?>>
+        %0 = vector.transfer_read %subview_2[%c0, %c0], %c0_i32 {in_bounds = [true, true]} : memref<64x64xi32, strided<[64, 1], offset: ?>>, vector<64x64xi32>
+        %1 = scf.for %arg7 = %c0 to %c16 step %c1 iter_args(%arg8 = %0) -> (vector<64x64xi32>) {
+          %2 = scf.for %arg9 = %c0 to %c16 step %c16 iter_args(%arg10 = %arg8) -> (vector<64x64xi32>) {
+            %subview_3 = memref.subview %subview[%arg7, %arg5, %arg9, 0] [1, 64, 16, 4] [1, 1, 1, 1] : memref<16x64x16x4xi8, strided<[4096, 64, 4, 1], offset: ?>> to memref<1x64x16x4xi8, strided<[4096, 64, 4, 1], offset: ?>>
+            %subview_4 = memref.subview %subview_0[%arg7, %arg9, %arg6, 0] [1, 16, 64, 4] [1, 1, 1, 1] : memref<16x16x64x4xi8, strided<[4096, 256, 4, 1], offset: ?>> to memref<1x16x64x4xi8, strided<[4096, 256, 4, 1], offset: ?>>
+            %3 = vector.transfer_read %subview_3[%c0, %c0, %c0, %c0], %c0_i8 {in_bounds = [true, true, true, true]} : memref<1x64x16x4xi8, strided<[4096, 64, 4, 1], offset: ?>>, vector<1x64x16x4xi8>
+            %4 = vector.transfer_read %subview_4[%c0, %c0, %c0, %c0], %c0_i8 {in_bounds = [true, true, true, true]} : memref<1x16x64x4xi8, strided<[4096, 256, 4, 1], offset: ?>>, vector<1x16x64x4xi8>
+            %5 = vector.contract {indexing_maps = [affine_map<(d0, d1, d2, d3, d4) -> (d0, d2, d4, d1)>, affine_map<(d0, d1, d2, d3, d4) -> (d0, d4, d3, d1)>, affine_map<(d0, d1, d2, d3, d4) -> (d2, d3)>], iterator_types = ["reduction", "reduction", "parallel", "parallel", "reduction"], kind = #vector.kind<add>} %3, %4, %arg10 : vector<1x64x16x4xi8>, vector<1x16x64x4xi8> into vector<64x64xi32>
+            scf.yield %5 : vector<64x64xi32>
+          }
+          scf.yield %2 : vector<64x64xi32>
+        }
+        vector.transfer_write %1, %subview_2[%c0, %c0] {in_bounds = [true, true]} : vector<64x64xi32>, memref<64x64xi32, strided<[64, 1], offset: ?>>
+      }
+    }
+  }
+  return
+}
+
+// CHECK-LABEL:   func.func @entry
+// CHECK-COUNT-16:     amx.tile_load
+// CHECK-COUNT-2:     scf.for
+// CHECK-COUNT-1:     collapse_shape
+// CHECK-COUNT-1:     amx.tile_load
+// CHECK-COUNT-1:     collapse_shape
+// CHECK-COUNT-1:     amx.tile_load
+// CHECK-COUNT-1:     collapse_shape
+// CHECK-COUNT-1:     amx.tile_load
+// CHECK-COUNT-1:     collapse_shape
+// CHECK-COUNT-1:     amx.tile_load
+// CHECK-COUNT-1:     collapse_shape
+// CHECK-COUNT-1:     amx.tile_load
+// CHECK-COUNT-1:     collapse_shape
+// CHECK-COUNT-1:     amx.tile_load
+// CHECK-COUNT-1:     collapse_shape
+// CHECK-COUNT-1:     amx.tile_load
+// CHECK-COUNT-1:     collapse_shape
+// CHECK-COUNT-1:     amx.tile_load
+// CHECK-COUNT-16:     amx.tile_muli
+// CHECK-COUNT-16:    amx.tile_store
