@@ -42,7 +42,7 @@ static void downConvertAndCopyResult(OpBuilder &rewriter, Location loc,
                                      Value src, Value dst,
                                      MemRefType bufferType, ShapedType accType,
                                      int64_t m, int64_t n) {
-  auto c0 = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+  auto c0 = rewriter.create<arith::ConstantIndexOp>(loc, 0);
   auto one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
   auto sixteen = rewriter.create<arith::ConstantIndexOp>(loc, 16);
   auto mBound = rewriter.create<arith::ConstantIndexOp>(loc, m);
@@ -87,7 +87,7 @@ static void upConvertAndCopyAccumulator(OpBuilder &rewriter, Location loc,
                                         Type inputElementType,
                                         Type outputElementType, int64_t m,
                                         int64_t n) {
-  auto c0 = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+  auto c0 = rewriter.create<arith::ConstantIndexOp>(loc, 0);
   auto one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
   auto sixteen = rewriter.create<arith::ConstantIndexOp>(loc, 16);
   auto mBound = rewriter.create<arith::ConstantIndexOp>(loc, m);
@@ -100,14 +100,10 @@ static void upConvertAndCopyAccumulator(OpBuilder &rewriter, Location loc,
             loc, c0, nBound, sixteen, iterArgs,
             [&](OpBuilder &innerBuilder, Location loc, Value innerIv,
                 ValueRange innerIterArgs) {
-              FloatType floatType = cast<FloatType>(inputElementType);
-              Value f0 = rewriter.create<arith::ConstantFloatOp>(
-                  loc, floatType,
-                  APFloat::getZero(floatType.getFloatSemantics()));
               // Read
               auto readC = rewriter.create<vector::TransferReadOp>(
                   loc, VectorType::get({16}, inputElementType), src,
-                  ValueRange{iv, innerIv}, f0, ArrayRef{true});
+                  ValueRange{iv, innerIv}, std::nullopt, ArrayRef{true});
               auto bitcastLoad = rewriter.create<vector::BitCastOp>(
                   loc, VectorType::get({16}, rewriter.getI16Type()), readC);
               // Convert
@@ -364,13 +360,15 @@ static SmallVector<Value, 4> createTileLoads(OpBuilder &builder, Location loc,
                                              Value subview, int dimSize,
                                              Value c0, bool isLHS = true) {
   SmallVector<Value, 4> loadTiles;
+  auto subviewType = cast<ShapedType>(subview.getType());
   // Choose step for the considered amx tile type <16x32xbf16> for A and B
   // matrix.
-  unsigned dimStep = isLHS ? 16 : 32;
+  unsigned dimStep = isLHS                                   ? 16
+                     : subviewType.getElementType().isBF16() ? 32
+                                                             : 64;
   for (int i = 0; i < dimSize; i += dimStep) {
     auto mIndex = isLHS ? builder.create<arith::ConstantIndexOp>(loc, i) : c0;
     auto nIndex = isLHS ? c0 : builder.create<arith::ConstantIndexOp>(loc, i);
-    auto subviewType = cast<ShapedType>(subview.getType());
     auto subviewRank = subviewType.getRank();
     auto collapsedOpnd =
         collapseInnerDims(builder, loc, subview, subviewRank - 2);
@@ -530,14 +528,6 @@ struct VectorContractToAMXPattern
                                std::next(insertAt->getIterator(), 1));
 
     Value c0 = rewriter.create<arith::ConstantIndexOp>(loc, 0);
-
-    // Up Convert and copy the original accumulator to the buffer.
-    // auto one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
-    // auto sixteen = rewriter.create<arith::ConstantIndexOp>(loc, 16);
-    // auto mBound = rewriter.create<arith::ConstantIndexOp>(loc, M);
-    // auto nBound = rewriter.create<arith::ConstantIndexOp>(loc, N);
-
-    // Intialize each accumulator with a tileType of size 16x16
     Type accElementType;
     Type outputElementType = accType.getElementType();
     outputElementType.isFloat() ? accElementType = rewriter.getF32Type()
@@ -556,6 +546,8 @@ struct VectorContractToAMXPattern
                                   accType.getElementType(), accElementType, M,
                                   N);
     }
+
+    // Intialize each accumulator with a tileType of size 16x16
     initAccs = initializeAccumulators(
         rewriter, loc, outputElementType.isBF16() ? accBuffer : accSubview,
         accElementType, M, N);
