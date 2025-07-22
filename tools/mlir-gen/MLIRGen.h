@@ -52,7 +52,7 @@ class MLIRGenerator {
   SmallVector<int64_t> tiles;
 
   /// Data type (element type of all tensors)
-  SmallVector<Type, 3> dataTypes;
+  SmallVector<Type> dataTypes;
 
   /// Random seed
   int seed;

@@ -115,19 +115,19 @@ MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
 
   // Pick data type
   auto elementType =
-      llvm::StringSwitch<std::optional<SmallVector<mlir::Type, 3>>>(targetType)
-          .CaseLower("f32", SmallVector<Type, 3>{builder.getF32Type(),
+      llvm::StringSwitch<std::optional<SmallVector<mlir::Type>>>(targetType)
+          .CaseLower("f32", SmallVector<Type>{builder.getF32Type(),
+                                              builder.getF32Type()})
+          .CaseLower("f16", SmallVector<Type>{builder.getF16Type(),
+                                              builder.getF16Type()})
+          .CaseLower("bf16", SmallVector<Type>{builder.getBF16Type(),
+                                               builder.getBF16Type()})
+          .CaseLower("mx-bf16", SmallVector<Type>{builder.getBF16Type(),
+                                                  builder.getF32Type()})
+          .CaseLower("mx-f16", SmallVector<Type>{builder.getF16Type(),
                                                  builder.getF32Type()})
-          .CaseLower("f16", SmallVector<Type, 3>{builder.getF16Type(),
-                                                 builder.getF16Type()})
-          .CaseLower("bf16", SmallVector<Type, 3>{builder.getBF16Type(),
-                                                  builder.getBF16Type()})
-          .CaseLower("mx-bf16", SmallVector<Type, 2>{builder.getBF16Type(),
-                                                     builder.getF32Type()})
-          .CaseLower("mx-f16", SmallVector<Type, 3>{builder.getF16Type(),
-                                                    builder.getF32Type()})
-          .CaseLower("mx-i8", SmallVector<Type, 3>{builder.getIntegerType(8),
-                                                   builder.getI32Type()})
+          .CaseLower("mx-i8", SmallVector<Type>{builder.getIntegerType(8),
+                                                builder.getI32Type()})
           .Default(std::nullopt);
   assert(elementType && "Unsupported data type");
   dataTypes.push_back((*elementType)[0]);
