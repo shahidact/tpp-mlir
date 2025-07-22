@@ -68,7 +68,8 @@ llvm::cl::opt<std::string>
 // Float type
 llvm::cl::opt<std::string>
     floatType("float-type", llvm::cl::desc("Float type and its bitsize"),
-              llvm::cl::value_desc("f32|f16|bf16"), llvm::cl::init("f32"));
+              llvm::cl::value_desc("f32|f16|bf16|mx-bf16|mx-f16|mx-i8"),
+              llvm::cl::init("f32"));
 
 // Random seed
 llvm::cl::opt<int> seed("seed", llvm::cl::desc("Random seed"),

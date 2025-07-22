@@ -114,16 +114,27 @@ MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
          "Must have 3 tile sizes (or none)");
 
   // Pick data type
-  auto elementType = llvm::StringSwitch<std::optional<Type>>(targetType)
-                         .CaseLower("f32", builder.getF32Type())
-                         .CaseLower("f16", builder.getF16Type())
-                         .CaseLower("bf16", builder.getBF16Type())
-                         .Default(std::nullopt);
+  auto elementType =
+      llvm::StringSwitch<std::optional<SmallVector<mlir::Type, 3>>>(targetType)
+          .CaseLower("f32", SmallVector<Type, 3>{builder.getF32Type(),
+                                                 builder.getF32Type()})
+          .CaseLower("f16", SmallVector<Type, 3>{builder.getF16Type(),
+                                                 builder.getF16Type()})
+          .CaseLower("bf16", SmallVector<Type, 3>{builder.getBF16Type(),
+                                                  builder.getBF16Type()})
+          .CaseLower("mx-bf16", SmallVector<Type, 2>{builder.getBF16Type(),
+                                                     builder.getF32Type()})
+          .CaseLower("mx-f16", SmallVector<Type, 3>{builder.getF16Type(),
+                                                    builder.getF32Type()})
+          .CaseLower("mx-i8", SmallVector<Type, 3>{builder.getIntegerType(8),
+                                                   builder.getI32Type()})
+          .Default(std::nullopt);
   assert(elementType && "Unsupported data type");
-  dataType = *elementType;
+  dataTypes.push_back((*elementType)[0]);
+  dataTypes.push_back((*elementType)[1]);
 
   // Disable VNNI packing if it is not a F16/BF16 data type
-   if (!dataType.isBF16() && !dataType.isF16())
+  if (!dataTypes[0].isBF16() && !dataTypes[0].isF16())
     vnniFactor = 0;
   assert(((vnniFactor >= 0) && (vnniFactor % 2 == 0)) &&
          "Invalid VNNI packing factor");
@@ -437,9 +448,45 @@ Value MLIRGenerator::lowerGenericMatmul(Value input, Value weight,
                 auto arg0 = blockArgs[0];
                 auto arg1 = blockArgs[1];
                 auto arg2 = blockArgs[2];
-                auto mul = nestedBuilder.create<arith::MulFOp>(loc, arg0, arg1);
-                auto add = nestedBuilder.create<arith::AddFOp>(loc, arg2, mul);
-                nestedBuilder.create<linalg::YieldOp>(loc, ValueRange{add});
+                // If input and output type differs, up cast input to output
+                // type using arith.extf/arith.extsi.
+                Type inputElementType =
+                    cast<ShapedType>(input.getType()).getElementType();
+                Type weightElementType =
+                    cast<ShapedType>(weight.getType()).getElementType();
+                Type outputElementType =
+                    cast<ShapedType>(output.getType()).getElementType();
+                if (inputElementType != outputElementType) {
+                  if (inputElementType.isFloat()) {
+                    arg0 = nestedBuilder.create<arith::ExtFOp>(
+                        loc, outputElementType, arg0);
+                  } else {
+                    arg0 = nestedBuilder.create<arith::ExtSIOp>(
+                        loc, outputElementType, arg0);
+                  }
+                }
+
+                if (weightElementType != outputElementType) {
+                  if (weightElementType.isFloat()) {
+                    arg1 = nestedBuilder.create<arith::ExtFOp>(
+                        loc, outputElementType, arg1);
+                  } else {
+                    arg1 = nestedBuilder.create<arith::ExtSIOp>(
+                        loc, outputElementType, arg1);
+                  }
+                }
+
+                auto *mul =
+                    outputElementType.isFloat()
+                        ? nestedBuilder.create<arith::MulFOp>(loc, arg0, arg1)
+                        : nestedBuilder.create<arith::MulIOp>(loc, arg0, arg1);
+                auto *add = outputElementType.isFloat()
+                                ? nestedBuilder.create<arith::AddFOp>(
+                                      loc, arg2, mul->getResult(0))
+                                : nestedBuilder.create<arith::AddIOp>(
+                                      loc, arg2, mul->getResult(0));
+                nestedBuilder.create<linalg::YieldOp>(
+                    loc, ValueRange{add->getResults()});
               })
           .getResult(0);
 
@@ -520,7 +567,7 @@ Value MLIRGenerator::lowerNamedRelu(Value input, Value output) {
     return input;
 
   auto outTy = cast<ShapedType>(input.getType());
-  auto zero = getConstFloat(builder, 0.0, cast<FloatType>(dataType));
+  auto zero = getConstFloat(builder, 0.0, cast<FloatType>(dataTypes[0]));
   Value emptyTensor = builder.create<tensor::EmptyOp>(loc, outTy, ValueRange{});
   auto fill =
       builder.create<linalg::FillOp>(loc, zero, emptyTensor)->getResult(0);
@@ -538,7 +585,7 @@ Value MLIRGenerator::lowerRelu(Value input, Value output) {
   if (!enableRelu)
     return input;
 
-  auto zero = getConstFloat(builder, 0.0, cast<FloatType>(dataType));
+  auto zero = getConstFloat(builder, 0.0, cast<FloatType>(dataTypes[0]));
   auto outTy = cast<ShapedType>(input.getType());
   auto map = getMap(input, MAP_PARALLEL);
   auto relu =
@@ -602,7 +649,7 @@ Value MLIRGenerator::lowerSoftmax(Value input, Value output) {
   auto redTy = getShape(dims, PACK_OUTPUT);
   Value redTensor =
       builder.create<tensor::EmptyOp>(loc, dims, outTy.getElementType());
-  auto zero = getConstFloat(builder, 0.0, cast<FloatType>(dataType));
+  auto zero = getConstFloat(builder, 0.0, cast<FloatType>(dataTypes[0]));
   auto fill = builder.create<linalg::FillOp>(loc, zero, redTensor);
   auto redux = builder.create<linalg::GenericOp>(
       loc, redTy, ValueRange{exp.getResult(0)}, ValueRange{fill.getResult(0)},
@@ -651,11 +698,13 @@ Value MLIRGenerator::lowerSoftmax(Value input, Value output) {
 TensorType MLIRGenerator::getShape(ArrayRef<int64_t> dims, PackingType type) {
   // Already packed type, just return ND tensor
   if (dims.size() > 2)
-    return RankedTensorType::get(dims, dataType);
+    return RankedTensorType::get(dims, type == PACK_OUTPUT ? dataTypes[1]
+                                                           : dataTypes[0]);
 
   // Unpacked type, just return 2D tensor
   if (!tiles.size())
-    return RankedTensorType::get(dims, dataType);
+    return RankedTensorType::get(dims, type == PACK_OUTPUT ? dataTypes[1]
+                                                           : dataTypes[0]);
 
   // Packed types block by tile size
   assert(tiles.size() == 3 && "Invalid tile size format");
@@ -671,7 +720,7 @@ TensorType MLIRGenerator::getShape(ArrayRef<int64_t> dims, PackingType type) {
     assert(x % n == 0 && "Invalid tile size for N dim");
     assert(y % c == 0 && "Invalid tile size for C dim");
     // N x C -> BN x BC x bn x bc
-    return RankedTensorType::get({x / n, y / c, n, c}, dataType);
+    return RankedTensorType::get({x / n, y / c, n, c}, dataTypes[0]);
   case PACK_WEIGHT:
     // VNNI packing can be done via tpp-opt --vnni-pack
     assert(x % k == 0 && "Invalid tile size for K dim");
@@ -680,20 +729,20 @@ TensorType MLIRGenerator::getShape(ArrayRef<int64_t> dims, PackingType type) {
     // VNNI: C x K -> BK x BC x bc/vnni x bk x vnni
     if (vnniFactor != 0)
       return RankedTensorType::get(
-          {y / k, x / c, c / vnniFactor, k, vnniFactor}, dataType);
+          {y / k, x / c, c / vnniFactor, k, vnniFactor}, dataTypes[0]);
 
     // C x K -> BK x BC x bc x bk
-    return RankedTensorType::get({y / k, x / c, c, k}, dataType);
+    return RankedTensorType::get({y / k, x / c, c, k}, dataTypes[0]);
   case PACK_OUTPUT:
     assert(x % n == 0 && "Invalid tile size for N dim");
 
     // Broadcast 1D -> 2D is Bk x bk only
     if (!y)
-      return RankedTensorType::get({x / k, k}, dataType);
+      return RankedTensorType::get({x / k, k}, dataTypes[1]);
 
     // N x K -> BN x BK x bn x bk
     assert(y % k == 0 && "Invalid tile size for K dim");
-    return RankedTensorType::get({x / n, y / k, n, k}, dataType);
+    return RankedTensorType::get({x / n, y / k, n, k}, dataTypes[1]);
   }
 
   llvm_unreachable("Unknown packing type");
@@ -838,7 +887,7 @@ int MLIRGenerator::getRand() {
 }
 
 Value MLIRGenerator::getZeroInitTensor(TensorType type) {
-  auto zero = getConstFloat(builder, 0.0, cast<FloatType>(dataType));
+  auto zero = getConstFloat(builder, 0.0, cast<FloatType>(dataTypes[0]));
   Value tensor =
       builder.create<tensor::EmptyOp>(loc, type, ValueRange{}).getResult();
   tensor = builder.create<linalg::FillOp>(loc, zero, tensor).getResult(0);
