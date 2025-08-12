@@ -23,22 +23,34 @@ namespace mlir {
 namespace vnni {
 namespace utils {
 
-// Returns True if the current architecture supports AMX instructions.
+// Returns true if the current architecture supports AMX instructions.
 bool hasAMX() {
   return (libxsmm_get_target_archid() >= LIBXSMM_X86_AVX512_SPR) &&
          (libxsmm_get_target_archid() < LIBXSMM_X86_ALLFEAT);
 }
 
-// Returns True if the current architecture supports AMX instructions.
+// Returns true if the current architecture supports AVX2 instructions.
 bool hasAVX2() {
   return (libxsmm_get_target_archid() >= LIBXSMM_X86_AVX2) &&
          (libxsmm_get_target_archid() < LIBXSMM_X86_ALLFEAT);
 }
 
-// Returns True if the current architecture supports AMX instructions.
+// Returns True if the current architecture supports AVX512 instructions.
 bool hasAVX512() {
   return (libxsmm_get_target_archid() >= LIBXSMM_X86_AVX512_SKX) &&
          (libxsmm_get_target_archid() < LIBXSMM_X86_ALLFEAT);
+}
+
+// Returns true if the current architecture supports SVE-256 instructions.
+bool hasSVE256() {
+  return (libxsmm_get_target_archid() >= LIBXSMM_AARCH64_NEOV2) &&
+         (libxsmm_get_target_archid() <= LIBXSMM_AARCH64_NEOV1);
+}
+
+// Returns true if the current architecture supports SVE-512 instructions.
+bool hasSVE512() {
+  return (libxsmm_get_target_archid() >= LIBXSMM_AARCH64_SVE512) &&
+         (libxsmm_get_target_archid() <= LIBXSMM_AARCH64_A64FX);
 }
 
 // Returns the current target architecture name
