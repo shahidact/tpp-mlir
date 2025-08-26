@@ -10,6 +10,11 @@
 // RUN: mlir-gen --kernel=args --seed=0 --float-type=mx-i8 --batch=128 --layers=2304,768 --tiles=64,48,64 --output=contract 2>&1 | FileCheck %s --check-prefix=MXI8-CONTRACT
 // RUN: mlir-gen --kernel=args --seed=0 --float-type=mx-f16 --batch=128 --layers=2304,768 --tiles=64,48,64 --output=contract 2>&1 | FileCheck %s --check-prefix=MXF16-CONTRACT
 
+// RUN: mlir-gen --kernel=args --seed=0 --float-type=mx-bf16 --batch=128 --layers=2304,768 --quant-type=dequantize 2>&1 | FileCheck %s --check-prefix=MXBF16-DEQUANT
+// RUN: mlir-gen --kernel=args --seed=0 --float-type=mx-i8-f32 --batch=128 --layers=2304,768 --quant-type=dequantize 2>&1 | FileCheck %s --check-prefix=MXI8F32-DEQUANT
+// RUN: mlir-gen --kernel=args --seed=0 --float-type=mx-f32-i8 --batch=128 --layers=2304,768 --quant-type=quantize 2>&1 | FileCheck %s --check-prefix=MXF32I8-QUANT
+
+
 // FP32: // RUN{{.*}}tpp-run %s -n {{\d*}}
 // FP32: // RUN{{.*}}-e entry -entry-point-result=void
 // FP32: // BENCH_TOTAL_FLOPS: 452984832
@@ -135,3 +140,101 @@
 // MXF16-CONTRACT:           %[[VAL_0:.*]] = linalg.contract indexing_maps = [#[[$ATTR_0]], #[[$ATTR_1]], #[[$ATTR_2]]] ins(%[[ARG0]], %[[ARG1]] : tensor<2x36x64x64xf16>, tensor<16x36x64x48xf16>) outs(%[[ARG2]] : tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32>
 // MXF16-CONTRACT:           return %[[VAL_0]] : tensor<2x16x64x48xf32>
 // MXF16-CONTRACT:         }
+
+// MXBF16-DEQUANT: #[[$ATTR_0:.+]] = affine_map<(d0, d1, d2) -> (d0, d2)>
+// MXBF16-DEQUANT: #[[$ATTR_1:.+]] = affine_map<(d0, d1, d2) -> (d2, d1)>
+// MXBF16-DEQUANT: #[[$ATTR_2:.+]] = affine_map<(d0, d1, d2) -> (d0, d1)>
+// MXBF16-DEQUANT: #[[$ATTR_3:.+]] = affine_map<(d0, d1) -> (d0)>
+// MXBF16-DEQUANT: #[[$ATTR_4:.+]] = affine_map<(d0, d1) -> (d1)>
+// MXBF16-DEQUANT: #[[$ATTR_5:.+]] = affine_map<(d0, d1) -> (d0, d1)>
+// MXBF16-DEQUANT-LABEL:   func.func @entry(
+// MXBF16-DEQUANT-SAME:                     %[[ARG0:.*]]: tensor<128x2304xbf16>,
+// MXBF16-DEQUANT-SAME:                     %[[ARG1:.*]]: tensor<128xf32>,
+// MXBF16-DEQUANT-SAME:                     %[[ARG2:.*]]: tensor<2304x768xbf16>,
+// MXBF16-DEQUANT-SAME:                     %[[ARG3:.*]]: tensor<768xf32>,
+// MXBF16-DEQUANT-SAME:                     %[[ARG4:.*]]: tensor<128x768xf32>) -> tensor<128x768xf32> {
+// MXBF16-DEQUANT:           %[[VAL_0:.*]] = linalg.contract indexing_maps = [#[[$ATTR_0]], #[[$ATTR_1]], #[[$ATTR_2]]] ins(%[[ARG0]], %[[ARG2]] : tensor<128x2304xbf16>, tensor<2304x768xbf16>) outs(%[[ARG4]] : tensor<128x768xf32>) -> tensor<128x768xf32>
+// MXBF16-DEQUANT:           %[[VAL_1:.*]] = tensor.empty() : tensor<128x768xf32>
+// MXBF16-DEQUANT:           %[[VAL_2:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_3]], #[[$ATTR_4]], #[[$ATTR_5]]], iterator_types = ["parallel", "parallel"]} ins(%[[ARG1]], %[[ARG3]] : tensor<128xf32>, tensor<768xf32>) outs(%[[VAL_1]] : tensor<128x768xf32>) {
+// MXBF16-DEQUANT:           ^bb0(%[[VAL_3:.*]]: f32, %[[VAL_4:.*]]: f32, %[[VAL_5:.*]]: f32):
+// MXBF16-DEQUANT:             %[[VAL_6:.*]] = arith.mulf %[[VAL_3]], %[[VAL_4]] : f32
+// MXBF16-DEQUANT:             linalg.yield %[[VAL_6]] : f32
+// MXBF16-DEQUANT:           } -> tensor<128x768xf32>
+// MXBF16-DEQUANT:           %[[VAL_7:.*]] = tensor.empty() : tensor<128x768xf32>
+// MXBF16-DEQUANT:           %[[VAL_8:.*]] = linalg.mul ins(%[[VAL_0]], %[[VAL_2]] : tensor<128x768xf32>, tensor<128x768xf32>) outs(%[[VAL_7]] : tensor<128x768xf32>) -> tensor<128x768xf32>
+// MXBF16-DEQUANT:           return %[[VAL_8]] : tensor<128x768xf32>
+// MXBF16-DEQUANT:         }
+
+// MXI8F32-DEQUANT: #[[$ATTR_0:.+]] = affine_map<(d0, d1, d2) -> (d0, d2)>
+// MXI8F32-DEQUANT: #[[$ATTR_1:.+]] = affine_map<(d0, d1, d2) -> (d2, d1)>
+// MXI8F32-DEQUANT: #[[$ATTR_2:.+]] = affine_map<(d0, d1, d2) -> (d0, d1)>
+// MXI8F32-DEQUANT: #[[$ATTR_3:.+]] = affine_map<(d0, d1) -> (d0)>
+// MXI8F32-DEQUANT: #[[$ATTR_4:.+]] = affine_map<(d0, d1) -> (d1)>
+// MXI8F32-DEQUANT: #[[$ATTR_5:.+]] = affine_map<(d0, d1) -> (d0, d1)>
+// MXI8F32-DEQUANT-LABEL:   func.func @entry(
+// MXI8F32-DEQUANT-SAME:                     %[[ARG0:.*]]: tensor<128x2304xi8>,
+// MXI8F32-DEQUANT-SAME:                     %[[ARG1:.*]]: tensor<128xf32>,
+// MXI8F32-DEQUANT-SAME:                     %[[ARG2:.*]]: tensor<2304x768xi8>,
+// MXI8F32-DEQUANT-SAME:                     %[[ARG3:.*]]: tensor<768xf32>,
+// MXI8F32-DEQUANT-SAME:                     %[[ARG4:.*]]: tensor<128x768xf32>) -> tensor<128x768xf32> {
+// MXI8F32-DEQUANT:           %[[VAL_0:.*]] = linalg.contract indexing_maps = [#[[$ATTR_0]], #[[$ATTR_1]], #[[$ATTR_2]]] ins(%[[ARG0]], %[[ARG2]] : tensor<128x2304xi8>, tensor<2304x768xi8>) outs(%[[ARG4]] : tensor<128x768xf32>) -> tensor<128x768xf32>
+// MXI8F32-DEQUANT:           %[[VAL_1:.*]] = tensor.empty() : tensor<128x768xf32>
+// MXI8F32-DEQUANT:           %[[VAL_2:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_3]], #[[$ATTR_4]], #[[$ATTR_5]]], iterator_types = ["parallel", "parallel"]} ins(%[[ARG1]], %[[ARG3]] : tensor<128xf32>, tensor<768xf32>) outs(%[[VAL_1]] : tensor<128x768xf32>) {
+// MXI8F32-DEQUANT:           ^bb0(%[[VAL_3:.*]]: f32, %[[VAL_4:.*]]: f32, %[[VAL_5:.*]]: f32):
+// MXI8F32-DEQUANT:             %[[VAL_6:.*]] = arith.mulf %[[VAL_3]], %[[VAL_4]] : f32
+// MXI8F32-DEQUANT:             linalg.yield %[[VAL_6]] : f32
+// MXI8F32-DEQUANT:           } -> tensor<128x768xf32>
+// MXI8F32-DEQUANT:           %[[VAL_7:.*]] = tensor.empty() : tensor<128x768xf32>
+// MXI8F32-DEQUANT:           %[[VAL_8:.*]] = linalg.mul ins(%[[VAL_0]], %[[VAL_2]] : tensor<128x768xf32>, tensor<128x768xf32>) outs(%[[VAL_7]] : tensor<128x768xf32>) -> tensor<128x768xf32>
+// MXI8F32-DEQUANT:           return %[[VAL_8]] : tensor<128x768xf32>
+// MXI8F32-DEQUANT:         }
+
+// MXF32I8-QUANT: #[[$ATTR_0:.+]] = affine_map<(d0, d1, d2) -> (d0, d2)>
+// MXF32I8-QUANT: #[[$ATTR_1:.+]] = affine_map<(d0, d1, d2) -> (d2, d1)>
+// MXF32I8-QUANT: #[[$ATTR_2:.+]] = affine_map<(d0, d1, d2) -> (d0, d1)>
+// MXF32I8-QUANT: #[[$ATTR_3:.+]] = affine_map<(d0) -> (d0)>
+// MXF32I8-QUANT: #[[$ATTR_4:.+]] = affine_map<(d0, d1) -> (d0, d1)>
+// MXF32I8-QUANT-LABEL:   func.func @entry(
+// MXF32I8-QUANT-SAME:                     %[[ARG0:.*]]: tensor<128x2304xf32>,
+// MXF32I8-QUANT-SAME:                     %[[ARG1:.*]]: tensor<2304x768xf32>,
+// MXF32I8-QUANT-SAME:                     %[[ARG2:.*]]: tensor<128x768xi8>) -> tensor<128x768xi8> {
+// MXF32I8-QUANT:           %[[VAL_0:.*]] = arith.constant 0.000000e+00 : f32
+// MXF32I8-QUANT:           %[[VAL_1:.*]] = tensor.empty() : tensor<128x768xf32>
+// MXF32I8-QUANT:           %[[VAL_2:.*]] = linalg.fill ins(%[[VAL_0]] : f32) outs(%[[VAL_1]] : tensor<128x768xf32>) -> tensor<128x768xf32>
+// MXF32I8-QUANT:           %[[VAL_3:.*]] = linalg.contract indexing_maps = [#[[$ATTR_0]], #[[$ATTR_1]], #[[$ATTR_2]]] ins(%[[ARG0]], %[[ARG1]] : tensor<128x2304xf32>, tensor<2304x768xf32>) outs(%[[VAL_2]] : tensor<128x768xf32>) -> tensor<128x768xf32>
+// MXF32I8-QUANT:           %[[VAL_4:.*]] = tensor.empty() : tensor<128x768xf32>
+// MXF32I8-QUANT:           %[[VAL_5:.*]] = arith.constant 0xFF800000 : f32
+// MXF32I8-QUANT:           %[[VAL_6:.*]] = tensor.empty() : tensor<768xf32>
+// MXF32I8-QUANT:           %[[VAL_7:.*]] = linalg.fill ins(%[[VAL_5]] : f32) outs(%[[VAL_6]] : tensor<768xf32>) -> tensor<768xf32>
+// MXF32I8-QUANT:           %[[VAL_8:.*]] = linalg.reduce ins(%[[VAL_3]] : tensor<128x768xf32>) outs(%[[VAL_7]] : tensor<768xf32>) dimensions = [0]
+// MXF32I8-QUANT:             (%[[VAL_9:.*]]: f32, %[[VAL_10:.*]]: f32) {
+// MXF32I8-QUANT:               %[[VAL_11:.*]] = math.absf %[[VAL_9]] : f32
+// MXF32I8-QUANT:               %[[VAL_12:.*]] = arith.maximumf %[[VAL_11]], %[[VAL_10]] : f32
+// MXF32I8-QUANT:               linalg.yield %[[VAL_12]] : f32
+// MXF32I8-QUANT:             }
+// MXF32I8-QUANT:           %[[VAL_13:.*]] = arith.constant 0 : i32
+// MXF32I8-QUANT:           %[[VAL_14:.*]] = arith.constant 0.000000e+00 : f32
+// MXF32I8-QUANT:           %[[VAL_15:.*]] = tensor.empty() : tensor<768xf32>
+// MXF32I8-QUANT:           %[[VAL_16:.*]] = linalg.fill ins(%[[VAL_14]] : f32) outs(%[[VAL_15]] : tensor<768xf32>) -> tensor<768xf32>
+// MXF32I8-QUANT:           %[[VAL_17:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_3]], #[[$ATTR_3]]], iterator_types = ["parallel"]} ins(%[[VAL_8]] : tensor<768xf32>) outs(%[[VAL_16]] : tensor<768xf32>) {
+// MXF32I8-QUANT:           ^bb0(%[[VAL_18:.*]]: f32, %[[VAL_19:.*]]: f32):
+// MXF32I8-QUANT:             %[[VAL_20:.*]] = llvm.intr.frexp(%[[VAL_18]]) : (f32) -> !llvm.struct<(f32, i32)>
+// MXF32I8-QUANT:             %[[VAL_21:.*]] = llvm.extractvalue %[[VAL_20]][1] : !llvm.struct<(f32, i32)>
+// MXF32I8-QUANT:             %[[VAL_22:.*]] = arith.constant 7 : i32
+// MXF32I8-QUANT:             %[[VAL_23:.*]] = arith.subi %[[VAL_21]], %[[VAL_22]] : i32
+// MXF32I8-QUANT:             %[[VAL_24:.*]] = arith.subi %[[VAL_13]], %[[VAL_23]] : i32
+// MXF32I8-QUANT:             %[[VAL_25:.*]] = arith.sitofp %[[VAL_24]] : i32 to f32
+// MXF32I8-QUANT:             %[[VAL_26:.*]] = math.exp2 %[[VAL_25]] : f32
+// MXF32I8-QUANT:             linalg.yield %[[VAL_26]] : f32
+// MXF32I8-QUANT:           } -> tensor<768xf32>
+// MXF32I8-QUANT:           %[[VAL_27:.*]] = linalg.fill ins(%[[VAL_5]] : f32) outs(%[[VAL_4]] : tensor<128x768xf32>) -> tensor<128x768xf32>
+// MXF32I8-QUANT:           %[[VAL_28:.*]] = linalg.broadcast ins(%[[VAL_17]] : tensor<768xf32>) outs(%[[VAL_27]] : tensor<128x768xf32>) dimensions = [0]
+// MXF32I8-QUANT:           %[[VAL_29:.*]] = linalg.mul ins(%[[VAL_3]], %[[VAL_28]] : tensor<128x768xf32>, tensor<128x768xf32>) outs(%[[VAL_2]] : tensor<128x768xf32>) -> tensor<128x768xf32>
+// MXF32I8-QUANT:           %[[VAL_30:.*]] = tensor.empty() : tensor<128x768xi8>
+// MXF32I8-QUANT:           %[[VAL_31:.*]] = linalg.generic {indexing_maps = [#[[$ATTR_4]], #[[$ATTR_4]]], iterator_types = ["parallel", "parallel"]} ins(%[[VAL_29]] : tensor<128x768xf32>) outs(%[[VAL_30]] : tensor<128x768xi8>) {
+// MXF32I8-QUANT:           ^bb0(%[[VAL_32:.*]]: f32, %[[VAL_33:.*]]: i8):
+// MXF32I8-QUANT:             %[[VAL_34:.*]] = arith.fptosi %[[VAL_32]] : f32 to i8
+// MXF32I8-QUANT:             linalg.yield %[[VAL_34]] : i8
+// MXF32I8-QUANT:           } -> tensor<128x768xi8>
+// MXF32I8-QUANT:           return %[[VAL_31]] : tensor<128x768xi8>
+// MXF32I8-QUANT:         }
