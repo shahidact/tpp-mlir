@@ -121,8 +121,7 @@ class MLIRGenerator {
   };
 
   /// Return shaped type (packed if requested)
-  TensorType getShape(ArrayRef<int64_t>, PackingType,
-                      bool isQuantKernel = false);
+  TensorType getShape(ArrayRef<int64_t>, PackingType);
 
   /// Return a zero-init tensor for matmul outputs
   Value getZeroInitTensor(TensorType);
@@ -242,7 +241,7 @@ class MLIRGenerator {
 
   /// Creates the kernel types from layer definitions and options. Boolean
   /// indicates if mixed type (quantization) is used.
-  void getKernelTypes(KernelArgs &, bool isQuantKernel = false);
+  void getKernelTypes(KernelArgs &);
 
   /// Creates a layer function, to be called by the kernel. Boolean indicates
   /// if mixed type (quantization) is used.
@@ -254,7 +253,7 @@ class MLIRGenerator {
   /// Creates a kernel (N * {GEMM + AddBias + ReLU} + Softmax)
   /// AddBias, ReLU and Softmax are optional. Boolean indicates if mixed type
   /// (quantization) is used.
-  void createKernel(bool hasMixedType = false, bool isQuantKernel = false);
+  void createKernel(bool hasMixedType = false);
 
 public:
   /// Creates a specific module. Different configurations need different modules
@@ -267,10 +266,8 @@ public:
 
   /// Generates the whole IR and write to file
   /// Return 0 on success, 1 on failure. 'hasMixedType' indicates simple mixed
-  /// type without quant. 'isQuantKernel' indicates a quantization kernel with
-  /// quant/dequant ops
-  int generate(StringRef filename, bool hasMixedType = false,
-               bool isQuantKernel = false);
+  /// type without quant.
+  int generate(StringRef filename, bool hasMixedType = false);
 };
 
 } // namespace mlir

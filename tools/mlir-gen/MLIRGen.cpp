@@ -184,7 +184,7 @@ MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
   builder.setInsertionPoint(module);
 }
 
-void MLIRGenerator::getKernelTypes(KernelArgs &args, bool isQuantKernel) {
+void MLIRGenerator::getKernelTypes(KernelArgs &args) {
   // Input type, also first layer's input
   TensorType currentType = getShape({batch, layers.front()}, PACK_INPUT);
 
@@ -200,14 +200,13 @@ void MLIRGenerator::getKernelTypes(KernelArgs &args, bool isQuantKernel) {
     arg.index = i;
     arg.input.type = currentType;
     // Scale inputs are only needed for dequantization.
-    if (isQuantKernel && quantType == QuantizationType::Dequant)
-      arg.inputScale.type = getShape({batch}, INPUT_SCALE, isQuantKernel);
+    if (quantType == QuantizationType::Dequant)
+      arg.inputScale.type = getShape({batch}, INPUT_SCALE);
     arg.weight.type = getShape({inputSize, outputSize}, PACK_WEIGHT);
-    if (isQuantKernel && quantType == QuantizationType::Dequant)
-      arg.weightScale.type =
-          getShape({outputSize}, WEIGHT_SCALE, isQuantKernel);
+    if (quantType == QuantizationType::Dequant)
+      arg.weightScale.type = getShape({outputSize}, WEIGHT_SCALE);
     arg.bias.type = getShape({outputSize}, PACK_OUTPUT);
-    arg.output.type = getShape({batch, outputSize}, PACK_OUTPUT, isQuantKernel);
+    arg.output.type = getShape({batch, outputSize}, PACK_OUTPUT);
     args.push_back(arg);
 
     // Update next input type with the output type of this layer
@@ -255,7 +254,7 @@ Value MLIRGenerator::createLayer(LayerArgs &args, bool hasMixedType) {
   return chain;
 }
 
-void MLIRGenerator::createKernel(bool hasMixedType, bool isQuantKernel) {
+void MLIRGenerator::createKernel(bool hasMixedType) {
   assert(((kernelType == KernelType::Const) ||
           (kernelType == KernelType::Args)) &&
          "Invalid kernel type");
@@ -263,7 +262,7 @@ void MLIRGenerator::createKernel(bool hasMixedType, bool isQuantKernel) {
 
   // Get all kernel types first
   KernelArgs args;
-  getKernelTypes(args, isQuantKernel);
+  getKernelTypes(args);
   assert(args.size() > 0 && "Invalid model size");
   unsigned lastLayer = args.size() - 1;
   auto &firstArg = args[0];
@@ -275,11 +274,11 @@ void MLIRGenerator::createKernel(bool hasMixedType, bool isQuantKernel) {
   SmallVector<Type, 1> inputTypes{firstArg.input.type};
   if (kernelType == KernelType::Args) {
     for (auto &layer : args) {
-      if (isQuantKernel && quantType == QuantizationType::Dequant)
+      if (quantType == QuantizationType::Dequant)
         inputTypes.push_back(layer.inputScale.type);
 
       inputTypes.push_back(layer.weight.type);
-      if (isQuantKernel && quantType == QuantizationType::Dequant)
+      if (quantType == QuantizationType::Dequant)
         inputTypes.push_back(layer.weightScale.type);
 
       if (enableBias)
@@ -297,13 +296,12 @@ void MLIRGenerator::createKernel(bool hasMixedType, bool isQuantKernel) {
   //   * Layer: input/weights/bias/output = args
   firstArg.input.value = func.getArgument(0);
   // Scales are only needed for dequantization
-  if (isQuantKernel && quantType == QuantizationType::Dequant)
+  if (quantType == QuantizationType::Dequant)
     firstArg.inputScale.value = func.getArgument(1);
 
   // Argument position is input + N * { weight/bias } + output
   // First weight is at position 1, every two
-  unsigned argPos =
-      !(isQuantKernel && quantType == QuantizationType::Dequant) ? 1 : 2;
+  unsigned argPos = !(quantType == QuantizationType::Dequant) ? 1 : 2;
   // Caches the output to chain into the next layer's input
   Value lastOutput;
   for (auto &arg : args) {
@@ -314,7 +312,7 @@ void MLIRGenerator::createKernel(bool hasMixedType, bool isQuantKernel) {
     // Initialize weights and biases
     if (kernelType == KernelType::Args) {
       arg.weight.value = func.getArgument(argPos++);
-      if (isQuantKernel && quantType == QuantizationType::Dequant)
+      if (quantType == QuantizationType::Dequant)
         arg.weightScale.value = func.getArgument(argPos++);
       if (enableBias)
         arg.bias.value = func.getArgument(argPos++);
@@ -341,7 +339,7 @@ void MLIRGenerator::createKernel(bool hasMixedType, bool isQuantKernel) {
     // Now pass the input through all layers.Separated the quantization layer
     // creation to simplify the design and reduce code complxity as there will
     // be more ways to introduce quantization ops in the future.
-    if (isQuantKernel)
+    if (quantType != QuantizationType::None)
       lastOutput = createQuantLayer(arg);
     else
       lastOutput = createLayer(arg, hasMixedType);
@@ -351,10 +349,9 @@ void MLIRGenerator::createKernel(bool hasMixedType, bool isQuantKernel) {
   builder.create<func::ReturnOp>(loc, lastArg.output.value);
 }
 
-int MLIRGenerator::generate(StringRef filename, bool hasMixedType,
-                            bool isQuantKernel) {
+int MLIRGenerator::generate(StringRef filename, bool hasMixedType) {
   // First, populate the module with all functions
-  createKernel(hasMixedType, isQuantKernel);
+  createKernel(hasMixedType);
 
   // Verify
   if (failed(module.verify())) {
@@ -1025,15 +1022,14 @@ Value MLIRGenerator::lowerSoftmax(Value input, Value output) {
   return softmax;
 }
 
-TensorType MLIRGenerator::getShape(ArrayRef<int64_t> dims, PackingType type,
-                                   bool isQuantKernel) {
+TensorType MLIRGenerator::getShape(ArrayRef<int64_t> dims, PackingType type) {
   // Already packed type, just return ND tensor
   if (dims.size() > 2)
     return RankedTensorType::get(dims, type == PACK_OUTPUT ? dataTypes[1]
                                                            : dataTypes[0]);
 
   if (!tiles.size()) {
-    if (isQuantKernel) {
+    if (quantType != QuantizationType::None) {
       if (type == INPUT_SCALE || type == WEIGHT_SCALE) {
         return RankedTensorType::get(dims, dataTypes[2]);
       } else if (type == PACK_OUTPUT) {
