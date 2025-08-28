@@ -138,6 +138,5 @@ int main(int argc, char **argv) {
   MLIRGenerator gen(outputOpKind, kernel, batch, layers, tiles, floatType,
                     scaleType, quantizationType, seed, identity, enableBias,
                     enableRelu, enableSoftmax, keepGenericMatmul, vnni);
-  return gen.generate(filename, floatType.getValue().find("mx-", 0) == 0,
-                      !quantizationType.getValue().empty());
+  return gen.generate(filename, floatType.getValue().find("mx-", 0) == 0);
 }
