@@ -201,10 +201,10 @@ class MLIRGenerator {
   Value computeScalingFactor(MLIRContext *ctx, Value input, Value scale);
 
   /// Creates a matmul quantization kernel
-  Value quantizeGemm(LayerArgs &args);
+  Value quantizeGemm(LayerArgs &args, Value chain);
 
   /// Creates a matmul dequantization kernel
-  Value dequantizeGemm(LayerArgs &args);
+  Value dequantizeGemm(LayerArgs &args, Value chain);
 
   /// Creates a bias add in the current function
   /// Args: Input, Output (same for in-place)
@@ -246,9 +246,6 @@ class MLIRGenerator {
   /// Creates a layer function, to be called by the kernel. Boolean indicates
   /// if mixed type (quantization) is used.
   Value createLayer(LayerArgs &, bool hasMixedType = false);
-
-  /// Creates a quant/dequant layer, to be called by the kernel
-  Value createQuantLayer(LayerArgs &);
 
   /// Creates a kernel (N * {GEMM + AddBias + ReLU} + Softmax)
   /// AddBias, ReLU and Softmax are optional. Boolean indicates if mixed type

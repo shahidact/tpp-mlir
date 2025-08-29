@@ -157,6 +157,10 @@ MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
           .Default(QuantizationType::None);
   quantType = *optQuantType;
 
+  // Update output kind to 'contract' if quantization is enabled.
+  if (quantType != QuantizationType::None)
+    outputOpKind = OutputOpKind::Contract;
+
   // Disable VNNI packing if it is not a F16/BF16 data type
   if (!dataTypes[0].isBF16() && !dataTypes[0].isF16())
     vnniFactor = 0;
@@ -214,23 +218,14 @@ void MLIRGenerator::getKernelTypes(KernelArgs &args) {
   }
 }
 
-// Entry point to crate layer with quantization ops.
-// Currently only supports gemm with quantization and dequantization.
-Value MLIRGenerator::createQuantLayer(LayerArgs &args) {
-  OpBuilder::InsertionGuard guard(builder);
-  Value chain;
-  if (quantType == QuantizationType::Dequant)
-    chain = dequantizeGemm(args);
-  else if (quantType == QuantizationType::Quant)
-    chain = quantizeGemm(args);
-  return chain;
-}
-
 Value MLIRGenerator::createLayer(LayerArgs &args, bool hasMixedType) {
   OpBuilder::InsertionGuard guard(builder);
 
   Value chain;
   chain = lowerMatmul(args, hasMixedType);
+
+  if (quantType == QuantizationType::Dequant)
+    chain = dequantizeGemm(args, chain);
 
   // These are optional and only emitted if enabled
   if (outputOpKind == OutputOpKind::Generic) {
@@ -240,6 +235,9 @@ Value MLIRGenerator::createLayer(LayerArgs &args, bool hasMixedType) {
     chain = lowerNamedBiasAdd(chain, args.bias.value, args.output.value);
     chain = lowerNamedRelu(chain, args.output.value);
   }
+
+  if (quantType == QuantizationType::Quant)
+    chain = quantizeGemm(args, chain);
 
   // Last layer may output softmax
   if (args.index == layers.size() - 1) {
@@ -336,13 +334,7 @@ void MLIRGenerator::createKernel(bool hasMixedType) {
       arg.output.value = getZeroInitTensor(arg.output.type);
     }
 
-    // Now pass the input through all layers.Separated the quantization layer
-    // creation to simplify the design and reduce code complxity as there will
-    // be more ways to introduce quantization ops in the future.
-    if (quantType != QuantizationType::None)
-      lastOutput = createQuantLayer(arg);
-    else
-      lastOutput = createLayer(arg, hasMixedType);
+    lastOutput = createLayer(arg, hasMixedType);
     arg.output.value = lastOutput;
   }
   // Data is now output
@@ -464,6 +456,13 @@ Value MLIRGenerator::lowerMatmul(LayerArgs &args, bool hasMixedType = false) {
   Value output = args.output.value;
   auto inputType = cast<ShapedType>(input.getType());
   auto outputType = cast<ShapedType>(output.getType());
+  auto shape = outputType.getShape();
+  auto contractOutputTy =
+      RankedTensorType::get(shape, inputType.getElementType());
+
+  // For quant, derive the output type from input type.
+  if (quantType == QuantizationType::Quant)
+    output = getZeroInitTensor(contractOutputTy);
 
   if (vnniPacked) {
     SmallVector<int64_t> vnniShape{inputType.getShape()};
@@ -670,7 +669,7 @@ Value MLIRGenerator::computeScalingFactor(MLIRContext *ctx, Value input,
   return broadcastScaleRes;
 }
 
-Value MLIRGenerator::quantizeGemm(LayerArgs &args) {
+Value MLIRGenerator::quantizeGemm(LayerArgs &args, Value chain) {
   Value input = args.input.value;
   Value weight = args.weight.value;
   Value output = args.output.value;
@@ -688,21 +687,15 @@ Value MLIRGenerator::quantizeGemm(LayerArgs &args) {
   maps.push_back(AffineMapAttr::get(getMap(weight, MAP_MATMUL_WEIGHT)));
   maps.push_back(AffineMapAttr::get(getMap(output, MAP_MATMUL_OUTPUT)));
   auto dquantVal = getZeroInitTensor(contractOutputTy);
-  auto contract = builder
-                      .create<linalg::ContractOp>(
-                          loc, contractOutputTy, ValueRange{input, weight},
-                          ValueRange{dquantVal}, builder.getArrayAttr(maps))
-                      .getResult(0);
   Value scalingFactor =
       builder.create<tensor::EmptyOp>(loc, contractOutputTy, ValueRange{});
-  scalingFactor = computeScalingFactor(&context, contract, scalingFactor);
+  scalingFactor = computeScalingFactor(&context, chain, scalingFactor);
 
-  auto dquantRes =
-      builder
-          .create<linalg::MulOp>(loc, contract.getType(),
-                                 ValueRange{contract, scalingFactor},
-                                 ValueRange{dquantVal})
-          .getResult(0);
+  auto dquantRes = builder
+                       .create<linalg::MulOp>(loc, chain.getType(),
+                                              ValueRange{chain, scalingFactor},
+                                              ValueRange{dquantVal})
+                       .getResult(0);
 
   // Convert to integer type
   auto castedOutput =
@@ -729,7 +722,7 @@ Value MLIRGenerator::quantizeGemm(LayerArgs &args) {
   return dquantRes;
 }
 
-Value MLIRGenerator::dequantizeGemm(LayerArgs &args) {
+Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
   Value input = args.input.value;
   Value inputScale = args.inputScale.value;
   Value weight = args.weight.value;
@@ -740,11 +733,6 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args) {
   maps.push_back(AffineMapAttr::get(getMap(input, MAP_MATMUL_INPUT)));
   maps.push_back(AffineMapAttr::get(getMap(weight, MAP_MATMUL_WEIGHT)));
   maps.push_back(AffineMapAttr::get(getMap(output, MAP_MATMUL_OUTPUT)));
-  auto contract = builder
-                      .create<linalg::ContractOp>(
-                          loc, output.getType(), ValueRange{input, weight},
-                          ValueRange{output}, builder.getArrayAttr(maps))
-                      .getResult(0);
 
   // For mixed type, we need to handle input and weight scales. Perform a dot
   // product of input and weight scales and then multiply the result with the
@@ -805,34 +793,34 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args) {
       builder.create<tensor::EmptyOp>(loc, outputScaleTy, ValueRange{});
   if (outputShapedTy.getElementType().isInteger() && dataTypes[2].isFloat()) {
     // Elementwise sitofp cast using linalg.generic
-    contract = builder
-                   .create<linalg::GenericOp>(
-                       loc, outputScaleTy, ValueRange{contract},
-                       ValueRange{castedOutput},
-                       ArrayRef<AffineMap>{getMap(contract, MAP_PARALLEL),
-                                           getMap(castedOutput, MAP_PARALLEL)},
-                       getIterators(MAP_PARALLEL),
-                       [&](OpBuilder &nestedBuilder, Location nestedLoc,
-                           ValueRange blockArgs) {
-                         auto arg0 = blockArgs[0];
-                         auto casted = nestedBuilder.create<arith::SIToFPOp>(
-                             loc, dataTypes[2], arg0);
-                         nestedBuilder.create<linalg::YieldOp>(
-                             loc, ValueRange{casted});
-                       })
-                   .getResult(0);
+    chain =
+        builder
+            .create<linalg::GenericOp>(
+                loc, outputScaleTy, ValueRange{chain}, ValueRange{castedOutput},
+                ArrayRef<AffineMap>{getMap(chain, MAP_PARALLEL),
+                                    getMap(castedOutput, MAP_PARALLEL)},
+                getIterators(MAP_PARALLEL),
+                [&](OpBuilder &nestedBuilder, Location nestedLoc,
+                    ValueRange blockArgs) {
+                  auto arg0 = blockArgs[0];
+                  auto casted = nestedBuilder.create<arith::SIToFPOp>(
+                      loc, dataTypes[2], arg0);
+                  nestedBuilder.create<linalg::YieldOp>(loc,
+                                                        ValueRange{casted});
+                })
+            .getResult(0);
   }
 
   // Multiply the contract output with the output scale factor
-  contract = builder
-                 .create<linalg::MulOp>(loc, TypeRange{castedOutput.getType()},
-                                        ValueRange{contract, dotProduct},
-                                        ValueRange{castedOutput})
-                 .getResult(0);
+  chain = builder
+              .create<linalg::MulOp>(loc, TypeRange{castedOutput.getType()},
+                                     ValueRange{chain, dotProduct},
+                                     ValueRange{castedOutput})
+              .getResult(0);
 
   // TODO: A place holder for flops computation for dequantization.
   computeMatmulFlops(inputShapedTy, outputShapedTy);
-  return contract;
+  return chain;
 }
 
 Value MLIRGenerator::lowerBiasAdd(Value input, Value bias, Value output) {
@@ -894,7 +882,8 @@ Value MLIRGenerator::lowerNamedRelu(Value input, Value output) {
     return input;
 
   auto outTy = cast<ShapedType>(input.getType());
-  auto zero = getConstFloat(builder, 0.0, cast<FloatType>(dataTypes[0]));
+  auto zero =
+      getConstFloat(builder, 0.0, cast<FloatType>(outTy.getElementType()));
   Value emptyTensor = builder.create<tensor::EmptyOp>(loc, outTy, ValueRange{});
   auto fill =
       builder.create<linalg::FillOp>(loc, zero, emptyTensor)->getResult(0);
