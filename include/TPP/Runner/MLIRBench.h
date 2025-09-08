@@ -109,6 +109,8 @@ class MLIRBench {
   Value registerOnGpu(Value buf, MemRefType memRefTy);
 
 public:
+  /// Return kernelArgs
+  llvm::SmallVector<Value> getKernelArgs() { return kernelArgs; }
   /// Creates context, builder
   MLIRBench(Operation *op, const MLIRBenchConfig &config);
 
