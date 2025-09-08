@@ -95,7 +95,7 @@ class MLIRGenerator {
   KernelType kernelType;
 
   /// List of supported quantization ops types that can be generated
-  enum class QuantizationType { None, Quant, Dequant };
+  enum class QuantizationType { None, Quant, Dequant, QuantDequant };
 
   /// Type of quantization ops to be generated
   QuantizationType quantType;
@@ -116,6 +116,7 @@ class MLIRGenerator {
     PACK_INPUT,
     PACK_WEIGHT,
     PACK_OUTPUT,
+    PACK_INTERMEDIATE,
     INPUT_SCALE,
     WEIGHT_SCALE
   };
@@ -163,6 +164,7 @@ class MLIRGenerator {
     Arg weight;
     Arg weightScale;
     Arg bias;
+    Arg intermediate; // For quantdequant validation
     Arg output;
   };
 
@@ -198,13 +200,15 @@ class MLIRGenerator {
 
   /// Computes scaling factor for the given input. Returns the scaling factor of
   /// same shape as input.
-  Value computeScalingFactor(MLIRContext *ctx, Value input, Value scale);
+  SmallVector<Value> computeScalingFactor(Value input);
 
   /// Creates a matmul quantization kernel
-  Value quantizeGemm(LayerArgs &args, Value chain);
+  Value quantizeGemm(LayerArgs &args, Value chain, Value scale);
 
   /// Creates a matmul dequantization kernel
   Value dequantizeGemm(LayerArgs &args, Value chain);
+
+  Value testQuantDequant(LayerArgs &args, Value input);
 
   /// Creates a bias add in the current function
   /// Args: Input, Output (same for in-place)

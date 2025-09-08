@@ -19,6 +19,7 @@
 
 #include "MLIRGen.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+// #include "mlir/IR/Value.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -154,6 +155,7 @@ MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
       llvm::StringSwitch<std::optional<QuantizationType>>(quantizationTypeStr)
           .CaseLower("quantize", QuantizationType::Quant)
           .CaseLower("dequantize", QuantizationType::Dequant)
+          .CaseLower("testquant", QuantizationType::QuantDequant)
           .Default(QuantizationType::None);
   quantType = *optQuantType;
 
@@ -210,7 +212,15 @@ void MLIRGenerator::getKernelTypes(KernelArgs &args) {
     if (quantType == QuantizationType::Dequant)
       arg.weightScale.type = getShape({outputSize}, WEIGHT_SCALE);
     arg.bias.type = getShape({outputSize}, PACK_OUTPUT);
-    arg.output.type = getShape({batch, outputSize}, PACK_OUTPUT);
+
+    // For QuantDequant, such as F32->i8->F32, we need an intermediate type to
+    // hold the quantized value.
+    if (quantType == QuantizationType::QuantDequant) {
+      arg.intermediate.type = getShape({batch, outputSize}, PACK_INTERMEDIATE);
+      arg.output.type = getShape({batch, outputSize}, PACK_INPUT);
+    } else {
+      arg.output.type = getShape({batch, outputSize}, PACK_OUTPUT);
+    }
     args.push_back(arg);
 
     // Update next input type with the output type of this layer
@@ -218,11 +228,51 @@ void MLIRGenerator::getKernelTypes(KernelArgs &args) {
   }
 }
 
+// Creates a quantize op around the gemm output and subsequently dequantize it.
+// This is mainly to validate the quantization scheme.
+Value MLIRGenerator::testQuantDequant(LayerArgs &args, Value input) {
+  SmallVector<Value> scalingFactors = computeScalingFactor(input);
+  Value chain = quantizeGemm(args, input, scalingFactors[0]);
+  Value reScaleFactor = scalingFactors[1];
+  Type rescaleType = reScaleFactor.getType();
+  auto castedOutput =
+      builder.create<tensor::EmptyOp>(loc, rescaleType, ValueRange{});
+  Value castedVal =
+      builder
+          .create<linalg::GenericOp>(
+              loc, rescaleType, ValueRange{chain}, ValueRange{castedOutput},
+              ArrayRef<AffineMap>{getMap(chain, MAP_PARALLEL),
+                                  getMap(castedOutput, MAP_PARALLEL)},
+              getIterators(MAP_PARALLEL),
+              [&](OpBuilder &nestedBuilder, Location nestedLoc,
+                  ValueRange blockArgs) {
+                auto arg0 = blockArgs[0];
+                auto casted = nestedBuilder.create<arith::SIToFPOp>(
+                    loc, dataTypes[2], arg0);
+                nestedBuilder.create<linalg::YieldOp>(loc, ValueRange{casted});
+              })
+          .getResult(0);
+  castedVal = builder
+                  .create<linalg::MulOp>(loc, TypeRange{castedOutput.getType()},
+                                         ValueRange{castedVal, reScaleFactor},
+                                         ValueRange{castedOutput})
+                  .getResult(0);
+  return castedVal;
+}
+
 Value MLIRGenerator::createLayer(LayerArgs &args, bool hasMixedType) {
   OpBuilder::InsertionGuard guard(builder);
 
   Value chain;
   chain = lowerMatmul(args, hasMixedType);
+
+  if (quantType == QuantizationType::QuantDequant)
+    return testQuantDequant(args, chain);
+
+  if (quantType == QuantizationType::Quant) {
+    SmallVector<Value> scalingFactors = computeScalingFactor(chain);
+    chain = quantizeGemm(args, chain, scalingFactors[0]);
+  }
 
   if (quantType == QuantizationType::Dequant)
     chain = dequantizeGemm(args, chain);
@@ -235,9 +285,6 @@ Value MLIRGenerator::createLayer(LayerArgs &args, bool hasMixedType) {
     chain = lowerNamedBiasAdd(chain, args.bias.value, args.output.value);
     chain = lowerNamedRelu(chain, args.output.value);
   }
-
-  if (quantType == QuantizationType::Quant)
-    chain = quantizeGemm(args, chain);
 
   // Last layer may output softmax
   if (args.index == layers.size() - 1) {
@@ -577,8 +624,7 @@ Value MLIRGenerator::lowerContract(Value input, Value weight, Value output) {
   return contract;
 }
 
-Value MLIRGenerator::computeScalingFactor(MLIRContext *ctx, Value input,
-                                          Value scale) {
+SmallVector<Value> MLIRGenerator::computeScalingFactor(Value input) {
   auto inputType = cast<ShapedType>(input.getType());
   assert(inputType.getRank() == 2 && "Input must be a 2D tensor");
 
@@ -617,93 +663,116 @@ Value MLIRGenerator::computeScalingFactor(MLIRContext *ctx, Value input,
   // Compute the scaling factors (2^(-exponent)) from the absolute maximum
   // values.
   Value zeroVal = builder.create<arith::ConstantIntOp>(loc, 0, 32);
-  Value zeroFloat =
-      builder.create<arith::ConstantOp>(loc, builder.getF32FloatAttr(0.0f));
-  Value channleScale =
-      builder.create<tensor::EmptyOp>(loc, reductionType, ValueRange{});
-  Value filledchannleScale =
-      builder.create<linalg::FillOp>(loc, zeroFloat, channleScale).getResult(0);
-  Value frExp =
-      builder
-          .create<linalg::GenericOp>(
-              loc, reductionType, ValueRange{absMax},
-              ValueRange{filledchannleScale},
-              ArrayRef<AffineMap>{getMap(absMax, MAP_PARALLEL),
-                                  getMap(filledchannleScale, MAP_PARALLEL)},
-              ArrayRef<utils::IteratorType>{utils::IteratorType::parallel},
-              [&](OpBuilder &nestedBuilder, Location nestedLoc,
-                  ValueRange args) {
-                Value frexpResult = LLVM::FractionExpOp::create(
-                    nestedBuilder, nestedLoc,
-                    LLVM::LLVMStructType::getLiteral(
-                        ctx, ArrayRef<Type>{elementType, builder.getI32Type()}),
-                    ValueRange{args[0]});
-                Value exponent = LLVM::ExtractValueOp::create(
-                                     nestedBuilder, nestedLoc,
-                                     builder.getI32Type(), frexpResult, 1)
-                                     .getResult();
-                Value unbiased = nestedBuilder.create<arith::SubIOp>(
-                    nestedLoc, exponent,
-                    builder.create<arith::ConstantOp>(
-                        nestedLoc, builder.getI32IntegerAttr(7)));
-                Value negExponent = nestedBuilder.create<arith::SubIOp>(
-                    nestedLoc, zeroVal, unbiased);
-                auto tchannleScale =
-                    nestedBuilder
-                        .create<math::Exp2Op>(
-                            nestedLoc, nestedBuilder.create<arith::SIToFPOp>(
-                                           nestedLoc, elementType, negExponent))
-                        ->getResult(0);
-                nestedBuilder.create<linalg::YieldOp>(nestedLoc, tchannleScale);
-              })
-          .getResult(0);
 
+  // Create two output tensors for the two results
+  context.getOrLoadDialect<mlir::LLVM::LLVMDialect>();
+  Value channelScale =
+      builder.create<tensor::EmptyOp>(loc, reductionType, ValueRange{});
+  Value channelReScale =
+      builder.create<tensor::EmptyOp>(loc, reductionType, ValueRange{});
+
+  auto frExp = builder.create<linalg::GenericOp>(
+      loc,
+      TypeRange{reductionType, reductionType}, // Specify multiple result types
+      ValueRange{absMax}, ValueRange{channelScale, channelReScale},
+      ArrayRef<AffineMap>{getMap(absMax, MAP_PARALLEL),
+                          getMap(channelScale, MAP_PARALLEL),
+                          getMap(channelReScale, MAP_PARALLEL)},
+      ArrayRef<utils::IteratorType>{utils::IteratorType::parallel},
+      [&](OpBuilder &nestedBuilder, Location nestedLoc, ValueRange args) {
+        Value frexpResult = LLVM::FractionExpOp::create(
+            nestedBuilder, nestedLoc,
+            LLVM::LLVMStructType::getLiteral(
+                &context, ArrayRef<Type>{elementType, builder.getI32Type()}),
+            ValueRange{args[0]});
+        Value exponent =
+            LLVM::ExtractValueOp::create(nestedBuilder, nestedLoc,
+                                         builder.getI32Type(), frexpResult, 1)
+                .getResult();
+        Value unbiased = nestedBuilder.create<arith::SubIOp>(
+            nestedLoc, exponent,
+            builder.create<arith::ConstantOp>(nestedLoc,
+                                              builder.getI32IntegerAttr(7)));
+        Value negExponent =
+            nestedBuilder.create<arith::SubIOp>(nestedLoc, zeroVal, unbiased);
+        auto tchannleReScale =
+            nestedBuilder
+                .create<math::Exp2Op>(nestedLoc,
+                                      nestedBuilder.create<arith::SIToFPOp>(
+                                          nestedLoc, elementType, unbiased))
+                ->getResult(0);
+        auto tchannleScale =
+            nestedBuilder
+                .create<math::Exp2Op>(nestedLoc,
+                                      nestedBuilder.create<arith::SIToFPOp>(
+                                          nestedLoc, elementType, negExponent))
+                ->getResult(0);
+        nestedBuilder.create<linalg::YieldOp>(
+            nestedLoc, ValueRange{tchannleScale, tchannleReScale});
+      });
+
+  SmallVector<Value> frExpVec;
+  frExpVec.push_back(frExp.getResults()[0]);
+  frExpVec.push_back(frExp.getResults()[1]);
+
+  SmallVector<Value> scalingFactors;
+  Value scalingFactor =
+      builder.create<tensor::EmptyOp>(loc, inputType, ValueRange{});
   Value filledTensor =
-      builder.create<linalg::FillOp>(loc, initValue, scale).getResult(0);
+      builder.create<linalg::FillOp>(loc, initValue, scalingFactor)
+          .getResult(0);
   // Broadcast to match output shape
   auto broadcastScaleRes =
       builder
-          .create<linalg::BroadcastOp>(loc, frExp, filledTensor,
+          .create<linalg::BroadcastOp>(loc, frExpVec[0], filledTensor,
                                        ArrayRef<int64_t>{0})
           ->getResult(0);
-  return broadcastScaleRes;
+  scalingFactors.push_back(broadcastScaleRes);
+
+  broadcastScaleRes =
+      builder
+          .create<linalg::BroadcastOp>(loc, frExpVec[1], filledTensor,
+                                       ArrayRef<int64_t>{0})
+          ->getResult(0);
+  scalingFactors.push_back(broadcastScaleRes);
+
+  return scalingFactors;
 }
 
-Value MLIRGenerator::quantizeGemm(LayerArgs &args, Value chain) {
+Value MLIRGenerator::quantizeGemm(LayerArgs &args, Value chain,
+                                  Value scaleFactor) {
   Value input = args.input.value;
   Value weight = args.weight.value;
-  Value output = args.output.value;
+  Type outputType = quantType == QuantizationType::QuantDequant
+                        ? args.intermediate.type
+                        : args.output.type;
 
   auto inputShapedTy = cast<ShapedType>(input.getType());
-  auto outputShapedTy = cast<ShapedType>(output.getType());
+  auto outputShapedTy = cast<ShapedType>(outputType);
   auto shape = outputShapedTy.getShape();
   // Create a output type for the quantized output using shape and input element
   // type.
   auto contractOutputTy =
       RankedTensorType::get(shape, inputShapedTy.getElementType());
-  context.getOrLoadDialect<mlir::LLVM::LLVMDialect>();
+
+  auto castedOutput =
+      builder.create<tensor::EmptyOp>(loc, outputShapedTy, ValueRange{});
   SmallVector<Attribute> maps;
   maps.push_back(AffineMapAttr::get(getMap(input, MAP_MATMUL_INPUT)));
   maps.push_back(AffineMapAttr::get(getMap(weight, MAP_MATMUL_WEIGHT)));
-  maps.push_back(AffineMapAttr::get(getMap(output, MAP_MATMUL_OUTPUT)));
+  maps.push_back(AffineMapAttr::get(getMap(castedOutput, MAP_MATMUL_OUTPUT)));
   auto dquantVal = getZeroInitTensor(contractOutputTy);
-  Value scalingFactor =
-      builder.create<tensor::EmptyOp>(loc, contractOutputTy, ValueRange{});
-  scalingFactor = computeScalingFactor(&context, chain, scalingFactor);
 
   auto dquantRes = builder
                        .create<linalg::MulOp>(loc, chain.getType(),
-                                              ValueRange{chain, scalingFactor},
+                                              ValueRange{chain, scaleFactor},
                                               ValueRange{dquantVal})
                        .getResult(0);
 
-  // Convert to integer type
-  auto castedOutput =
-      builder.create<tensor::EmptyOp>(loc, output.getType(), ValueRange{});
   dquantRes =
       builder
           .create<linalg::GenericOp>(
-              loc, output.getType(), ValueRange{dquantRes},
+              loc, outputShapedTy, ValueRange{dquantRes},
               ValueRange{castedOutput},
               ArrayRef<AffineMap>{getMap(dquantRes, MAP_PARALLEL),
                                   getMap(castedOutput, MAP_PARALLEL)},
@@ -1023,6 +1092,10 @@ TensorType MLIRGenerator::getShape(ArrayRef<int64_t> dims, PackingType type) {
         return RankedTensorType::get(dims, dataTypes[2]);
       } else if (type == PACK_OUTPUT) {
         return RankedTensorType::get(dims, dataTypes[1]);
+      } else if (type == PACK_INPUT) {
+        return RankedTensorType::get(dims, dataTypes[0]);
+      } else if (type == PACK_INTERMEDIATE) {
+        return RankedTensorType::get(dims, dataTypes[1]);
       }
     }
     // Unpacked type, just return 2D tensor
@@ -1070,6 +1143,8 @@ TensorType MLIRGenerator::getShape(ArrayRef<int64_t> dims, PackingType type) {
     return RankedTensorType::get({n}, dataTypes[2]);
   case WEIGHT_SCALE:
     return RankedTensorType::get({k}, dataTypes[2]);
+  case PACK_INTERMEDIATE:
+    llvm_unreachable("Unknown intermediate packing type");
   }
 
   llvm_unreachable("Unknown packing type");

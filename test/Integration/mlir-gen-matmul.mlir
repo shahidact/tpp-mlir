@@ -195,12 +195,13 @@
 // MXF32I8-QUANT:           linalg.reduce {{.*}} dimensions = [0]
 // MXF32I8-QUANT:               math.absf
 // MXF32I8-QUANT:               arith.maximumf
-// MXF32I8-QUANT:           linalg.generic  {indexing_maps = [#map3, #map3], iterator_types = ["parallel"]}
+// MXF32I8-QUANT:           linalg.generic  {indexing_maps = [#map3, #map3, #map3], iterator_types = ["parallel"]}
 // MXF32I8-QUANT:               llvm.intr.frexp
 // MXF32I8-QUANT:               llvm.extractvalue
 // MXF32I8-QUANT:               arith.constant 7
 // MXF32I8-QUANT:               arith.subi
 // MXF32I8-QUANT:               arith.subi
+// MXF32I8-QUANT:               arith.sitofp
 // MXF32I8-QUANT:               arith.sitofp
 // MXF32I8-QUANT:               math.exp2
 // MXF32I8-QUANT:           linalg.broadcast
