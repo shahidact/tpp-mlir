@@ -75,6 +75,11 @@ llvm::cl::opt<bool> printKernelResult("print",
                                       llvm::cl::desc("Print kernel result"),
                                       llvm::cl::init(false));
 
+// Print input args
+llvm::cl::opt<bool> printKernelInput("print-input",
+                                     llvm::cl::desc("Print kernel inputs"),
+                                     llvm::cl::init(false));
+
 // Replace dense splat tensors with random dense
 llvm::cl::opt<bool>
     splatRandom("splat-to-random",
@@ -194,6 +199,7 @@ static LogicalResult prepareMLIRKernel(Operation *op,
   // Warmup on GPUs are currently breaking buffer allocation on GPUs
   wrapperOpts.benchWarmup = defGpuBackend.empty();
   wrapperOpts.printResult = printKernelResult;
+  wrapperOpts.printInput = printKernelInput;
   wrapperOpts.randomSplat = splatRandom;
   wrapperOpts.seed = seed;
   wrapperOpts.initType = initType;
