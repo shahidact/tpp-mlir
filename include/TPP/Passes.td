@@ -145,7 +145,6 @@ def BF16DotProduct : Pass<"vector-contract-to-bf16dp"> {
    let dependentDialects = [ "vector::VectorDialect", "scf::SCFDialect", "x86vector::X86VectorDialect" ];
 }
 
-
 def MicroKernels : Pass<"vector-contract-to-micro-kernels"> {
    let summary = "Perform  lowering of vector contraction operation";
    let description = [{Add commentMore actions
@@ -159,6 +158,20 @@ def MicroKernels : Pass<"vector-contract-to-micro-kernels"> {
          Option<"targetFeature", "target-feature", "std::string", "",
                 "Target feature for a given architecture">,
   ];
+}
+
+def MicroKernelsAMX : Pass<"vector-contract-to-micro-kernels-amx"> {
+   let summary = "Perform AMX target lowering of vector contraction operation";
+   let description = [{
+     Perform  flat layout AMX target micro kernel lowering of vector contraction operation.
+   }];
+   let dependentDialects = [ "vector::VectorDialect",
+                             "memref::MemRefDialect",
+                             "linalg::LinalgDialect",
+                             "scf::SCFDialect",
+                             "arith::ArithDialect",
+                             "amx::AMXDialect",
+                             "x86vector::X86VectorDialect" ];
 }
 
 def ConvertXsmmToFunc : Pass<"convert-xsmm-to-func", "ModuleOp"> {
