@@ -4,14 +4,11 @@ add_mlir_library(TPPTransforms
   Bufferize.cpp
   ConstantFoldPack.cpp
   ConvertForAllToParallelOp.cpp
-  ConvInitSimplify.cpp
   DecomposeAggregatedOps.cpp
   LinalgDeGeneralize.cpp
   LowerPacksAndUnpacks.cpp
   LowerPacksAndUnpacksWithoutTranspose.cpp
   RewriteBatchMatmulToMatmul.cpp
-  RewriteConvsToMatmulOrBrgemm.cpp
-  RewriteConvToMatmulImpl.cpp
   RewriteToBatchReduceGemm.cpp
   TileConsumerAndFuseProducers.cpp
   ToBlockLayoutAndBack.cpp

@@ -25,15 +25,11 @@ __all__.append(cleanup.__name__)
 def tpp_mapping(mod, lower_pack_unpack_without_transpose: bool = False, **_config):
     "High-level transforms that map operations to TPP-compatible forms."
 
-    # Preprocess convolutions.
+    # Canonicalize.
     func = match(mod, ops={"func.func"})
-    apply_registered_pass(func, "conv-init-simplify")
     mod = cleanup(mod)
     # Convert ops to packed layouts.
     func = match(mod, ops={"func.func"})
-    func = apply_registered_pass(func, "pack-conv2DNchwFchw")
-    func = apply_registered_pass(func, "pack-conv2DNhwcHwcf")
-    func = apply_registered_pass(func, "rewrite-conv-to-matmul-or-brgemm")
     func = apply_registered_pass(func, "pack-matmul")
     apply_registered_pass(func, "pack-vnni")
     if lower_pack_unpack_without_transpose:
