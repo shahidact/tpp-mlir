@@ -132,6 +132,7 @@ struct VectorizationPass
     vector::populateVectorTransferPermutationMapLoweringPatterns(patterns);
     vector::populateVectorReductionToContractPatterns(patterns);
     vector::populateFoldArithExtensionPatterns(patterns);
+    vector::populateElementwiseToVectorOpsPatterns(patterns);
     (void)applyPatternsGreedily(getOperation(), std::move(patterns));
   }
 };

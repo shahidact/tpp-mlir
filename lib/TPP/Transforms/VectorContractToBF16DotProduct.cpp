@@ -35,7 +35,9 @@ namespace tpp {
 static FailureOr<SmallVector<vector::TransferReadOp>>
 getContractProducers(vector::ContractionOp contractOp) {
   SmallVector<vector::TransferReadOp> list;
+  llvm::errs() << "Contract Op: " << contractOp << "\n";
   for (Value operand : contractOp->getOperands()) {
+    llvm::errs() << "Operand: " << operand << "\n";
     auto vectorReadOp = operand.getDefiningOp<vector::TransferReadOp>();
     if (!vectorReadOp)
       return failure();
