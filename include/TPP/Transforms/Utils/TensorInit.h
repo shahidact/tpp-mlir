@@ -42,17 +42,21 @@ template <typename T> struct TensorInit : public ITensorInit {
   // a reasonable distribution.
   virtual llvm::FailureOr<mlir::DenseElementsAttr>
   get(mlir::ShapedType shape) override {
+    llvm::errs() << "TensorInit::get(): shape=" << shape << "\n";
     if (!checkShape(shape))
       return llvm::failure();
-
+    llvm::errs() << "TensorInit::get(): 0" << "\n";
     // Populate the shape
     buffer.clear();
     fillData();
-
+    llvm::errs() << "TensorInit::get(): 1" << "\n";
     // For some reason, memref global op needs dense tensor type
     // See: lib/Dialect/MemRef/IR/MemRefOps.cpp :: GlobalOp::verify
     auto tensorType =
         mlir::RankedTensorType::get(shape.getShape(), shape.getElementType());
+    llvm::errs() << "TensorInit::get(): tensorType: "
+                 << tensorType.getNumElements() << "\n";
+    llvm::errs() << "TensorInit::get(): buffer: " << buffer.size() << "\n";
     return mlir::DenseElementsAttr::get(tensorType, buffer);
   }
 
@@ -63,6 +67,8 @@ protected:
   size_t size;
   // Data pointer
   std::vector<T> buffer;
+
+  std::vector<T> scaleSamples;
 
   // Check the shape and fill the internal structure
   virtual bool checkShape(mlir::ShapedType shape) {
@@ -103,6 +109,8 @@ enum class TensorInitType {
   Random,
   Normal,
   Identity,
+  Quant,
+  Zero,
   Invalid
 };
 

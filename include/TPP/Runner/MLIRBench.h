@@ -23,6 +23,7 @@
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include <utility> // For std::pair
 
 #include "TPP/Transforms/Utils/TensorInit.h"
 
@@ -40,14 +41,15 @@ class FuncOp;
 // pipeline.
 struct MLIRBenchConfig {
   MLIRBenchConfig() = default;
-  MLIRBenchConfig(int seed, TensorInitType initType, int identity, std::string backend,
-                  bool offloadToDevice)
-      : seed(seed), initType(initType), identity(identity), backend(backend),
-        offloadToDevice(offloadToDevice) {}
+  MLIRBenchConfig(int seed, TensorInitType initType, int identity, int zero,
+                  std::string backend, bool offloadToDevice)
+      : seed(seed), initType(initType), identity(identity), zero(zero),
+        backend(backend), offloadToDevice(offloadToDevice) {}
 
   int seed = 0;
   TensorInitType initType = TensorInitType::Auto;
   int identity = -1;
+  int zero = -1;
   std::string backend = "cpu";
   bool offloadToDevice = true;
 };
@@ -71,8 +73,7 @@ class MLIRBench {
   /// Kernel function, if found
   func::FuncOp kernel;
 
-  /// Values of the kernel arguments (no need to declare every time)
-  llvm::SmallVector<Value> kernelArgs;
+  llvm::SmallVector<std::pair<Value, Value>> kernelArgs;
 
   /// Main wrapper function, calls kernel
   func::FuncOp main;
@@ -88,6 +89,9 @@ class MLIRBench {
 
   /// Which argument is the identity, if any
   int identity;
+
+  /// Which argument is the zero, if any
+  int zero;
 
   /// Tensor init type
   TensorInitType initType;
@@ -110,7 +114,9 @@ class MLIRBench {
 
 public:
   /// Return kernelArgs
-  llvm::SmallVector<Value> getKernelArgs() { return kernelArgs; }
+  llvm::SmallVector<std::pair<Value, Value>> getKernelArgs() {
+    return kernelArgs;
+  }
   /// Creates context, builder
   MLIRBench(Operation *op, const MLIRBenchConfig &config);
 

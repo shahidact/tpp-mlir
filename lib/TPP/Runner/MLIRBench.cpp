@@ -38,6 +38,7 @@
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include "TPP/Dialect/Perf/PerfDialect.h"
 #include "TPP/Dialect/Perf/PerfOps.h"
@@ -57,6 +58,7 @@ MLIRBench::MLIRBench(mlir::Operation *op, const MLIRBenchConfig &config)
     : builder(op->getContext()), unkLoc(builder.getUnknownLoc()) {
   seed = config.seed;
   identity = config.identity;
+  zero = config.zero;
   backend = config.backend;
   initType = config.initType;
   offloadToDevice = config.offloadToDevice;
@@ -230,6 +232,25 @@ LogicalResult MLIRBench::createKernelArgs() {
         return module.emitError("Invalid shape for identity init");
       }
     }
+
+    if (argNum == zero) {
+      ShapedType shape = dyn_cast<ShapedType>(ty);
+      if (shape && shape.getRank() == 2 &&
+          shape.getDimSize(0) == shape.getDimSize(1)) {
+        argInitType = TensorInitType::Zero;
+      } else {
+        return module.emitError("Invalid shape for identity init");
+      }
+    }
+    llvm::errs() << "kernel.getArgumentTypes().size():  "
+                 << kernel.getArgumentTypes().size() << "\n";
+    llvm::errs() << "argNum : " << argNum << "\n";
+    if (kernel.getArgumentTypes().size() - 1 == static_cast<size_t>(argNum) &&
+        argInitType == TensorInitType::Quant) {
+      llvm::errs() << "Argument " << argNum << " type: " << ty << "\n";
+      argInitType = TensorInitType::Normal;
+    }
+
     auto arg =
         TypeSwitch<Type, std::optional<Value>>(ty)
             .Case<MemRefType>([&](auto memRefTy) {
@@ -257,7 +278,8 @@ LogicalResult MLIRBench::createKernelArgs() {
     if (!arg)
       return module.emitError("Cannot create kernel argument");
 
-    kernelArgs.push_back(*arg);
+    kernelArgs.push_back(std::make_pair(
+        *arg, Value())); // Replace with appropriate second value if needed
     argNum++;
   }
 
@@ -278,7 +300,10 @@ LogicalResult MLIRBench::createMainWrapper() {
 
 Operation *MLIRBench::callKernel() {
   // Call the kernel
-  return builder.create<func::CallOp>(unkLoc, kernel, kernelArgs);
+  llvm::SmallVector<mlir::Value> kernelArgsTemp;
+  for (auto &arg : kernelArgs)
+    kernelArgsTemp.push_back(arg.first);
+  return builder.create<func::CallOp>(unkLoc, kernel, kernelArgsTemp);
 }
 
 Value MLIRBench::createTimerLoop(unsigned iters) {
@@ -332,6 +357,7 @@ void MLIRBench::printVector(Value vector) {
 LogicalResult MLIRBench::printShapedType(mlir::Value val) {
   OpBuilder::InsertionGuard guard(builder);
 
+  llvm::errs() << "Printing shaped type: " << val << "\n";
   auto outputType = cast<ShapedType>(val.getType());
   assert(outputType && "expected a shaped type");
 
@@ -383,7 +409,10 @@ LogicalResult MLIRBench::printShapedType(mlir::Value val) {
   // Loop body
   auto beginIdx = loop.getInductionVar();
   auto vector = builder.create<vector::TransferReadOp>(
-      unkLoc, vecType, val, ValueRange{beginIdx, zero}, undefLengthCst);
+      unkLoc, vecType, val,
+      outputType.getRank() == 1 ? ValueRange{beginIdx}
+                                : ValueRange{beginIdx, zero},
+      undefLengthCst);
   printVector(vector);
 
   // Finally lower to LLVM Dialect

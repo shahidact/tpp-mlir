@@ -95,7 +95,14 @@ class MLIRGenerator {
   KernelType kernelType;
 
   /// List of supported quantization ops types that can be generated
-  enum class QuantizationType { None, Quant, Dequant, QuantDequant };
+  enum class QuantizationType {
+    None,
+    Quant,
+    Dequant,
+    QuantDequant,
+    QuantDequantF32,
+    MixedPrecision
+  };
 
   /// Type of quantization ops to be generated
   QuantizationType quantType;
@@ -208,7 +215,11 @@ class MLIRGenerator {
   /// Creates a matmul dequantization kernel
   Value dequantizeGemm(LayerArgs &args, Value chain);
 
+  Value dequantize(Value inputScale, Value weightScale, Value chain);
+
   Value testQuantDequant(LayerArgs &args, Value input);
+
+  Value quantDequantF32(LayerArgs &args);
 
   /// Creates a bias add in the current function
   /// Args: Input, Output (same for in-place)

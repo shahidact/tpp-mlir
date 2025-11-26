@@ -210,11 +210,11 @@ private:
     pm.addPass(createFinalizeMemRefToLLVMConversionPass());
     pm.addPass(createSCFToControlFlowPass());
 
-    pm.addNestedPass<func::FuncOp>(createGpuAsyncRegionPass());
-    pm.addPass(createGpuToLLVMConversionPass());
+    // pm.addNestedPass<func::FuncOp>(createGpuAsyncRegionPass());
+    // pm.addPass(createGpuToLLVMConversionPass());
     GpuModuleToBinaryPassOptions gpuModuleToBinaryPassOptions;
     gpuModuleToBinaryPassOptions.compilationTarget = "fatbin";
-    pm.addPass(createGpuModuleToBinaryPass(gpuModuleToBinaryPassOptions));
+    // pm.addPass(createGpuModuleToBinaryPass(gpuModuleToBinaryPassOptions));
     pm.addPass(createConvertMathToLLVMPass());
     pm.addPass(createAsyncToAsyncRuntimePass());
     pm.addPass(createAsyncRuntimeRefCountingPass());

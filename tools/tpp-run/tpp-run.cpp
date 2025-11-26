@@ -106,6 +106,11 @@ llvm::cl::opt<int> identity(
     llvm::cl::desc("Identity matrix on one argument (-1=none, 0=a, 1=b, ...)"),
     llvm::cl::init(-1));
 
+llvm::cl::opt<int>
+    zero("zero",
+         llvm::cl::desc("Zero matrix on one argument (-1=none, 0=a, 1=b, ...)"),
+         llvm::cl::init(-1));
+
 // Speed optimization level
 llvm::cl::opt<unsigned>
     optLevel("O", llvm::cl::desc("Speed optimization level (O0, O1, O2, O3)"),
@@ -204,6 +209,7 @@ static LogicalResult prepareMLIRKernel(Operation *op,
   wrapperOpts.seed = seed;
   wrapperOpts.initType = initType;
   wrapperOpts.identity = identity;
+  wrapperOpts.zero = zero;
   passManager.addPass(tpp::createTppRunnerWrapper(wrapperOpts));
 
   tpp::DefaultPipelineOptions defPipelineOpts{defGpuBackend,

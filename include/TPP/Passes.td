@@ -583,6 +583,9 @@ def TppRunnerWrapper : Pass<"tpp-runner-wrapper", "ModuleOp">{
     Option<"identity", "identity", "int64_t",
             /*default=*/"-1",
            "Identity square argument (-1=none, 0=a, 1=b, ...).">,
+    Option<"zero", "zero", "int64_t",
+            /*default=*/"-1",
+           "Zero square argument (-1=none, 0=a, 1=b, ...).">,
   ];
 }
 

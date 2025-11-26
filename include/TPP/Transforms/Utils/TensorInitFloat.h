@@ -16,6 +16,8 @@
 #define TPP_TRANSFORMS_UTILS_TENSORINITFLOAT_H
 
 #include "TPP/Transforms/Utils/TensorInit.h"
+// #include "TPP/Transforms/Utils/TensorInitInt.h" // Include the header for
+// QuantTensorInitInt
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Types.h"
 
@@ -155,4 +157,58 @@ struct IdentityTensorInitFloat : TensorInitFloat {
   void fillData() override;
 };
 
+struct ZeroTensorInitFloat : TensorInitFloat {
+  ZeroTensorInitFloat(DataType type) : TensorInitFloat(type) {}
+
+  // Should not be called.
+  float next() { assert(false && "Should not be called"); }
+
+  // Return zero throughout the shape.
+  void fillData() override;
+};
+
+// Random init (Quant).
+struct QuantTensorInitFloat : TensorInitFloat {
+  // Declare QuantTensorInitInt as friend to access private members.
+  friend struct QuantTensorInitInt;
+
+  // Construct an object of QuantTensorInitInt to access its methods.
+  // QuantTensorInitInt quantInitIntInstance;
+
+  QuantTensorInitFloat(DataType type, int seed)
+      : TensorInitFloat(type),
+        /*quantInitIntInstance(static_cast<TensorInitInt::DataType>(type),
+        seed),*/
+        generator(seed), distribution(0.0, 0.2) {}
+
+  // Method to update the buffer externally
+  void updateBuffer(const std::vector<llvm::APFloat> &newBuffer) {
+    llvm::errs() << "QuantTensorInitFloat::updateBuffer() called\n";
+    // buffer = newBuffer;
+    scaleSamples = newBuffer;
+    for (size_t i = 0; i < scaleSamples.size(); i++) {
+      llvm::errs() << "QuantTensorInitFloat::updateBuffer() buffer[" << i
+                   << "]=" << scaleSamples[i] << "\n";
+    }
+  }
+
+  // Next random number.
+  float next() {
+    auto value = distribution(generator);
+    value = std::clamp(value, 0.0f, 1.0f);
+    return value;
+  }
+
+  // Return a dense<normal(0.0, 1.0)> throughout the shape.
+  void fillData() override;
+
+  std::vector<llvm::APFloat> computeReScales(const std::vector<float> &samples);
+
+private:
+  // std::vector<float> scaleSamples;
+  // Random generator.
+  std::default_random_engine generator;
+  // Random distribution.
+  std::normal_distribution<float> distribution;
+};
 #endif // TPP_TRANSFORMS_UTILS_TENSORINITFLOAT_H

@@ -9,6 +9,9 @@
 #include "TPP/Transforms/Utils/TensorInit.h"
 #include "TPP/Transforms/Utils/TensorInitFloat.h"
 #include "TPP/Transforms/Utils/TensorInitInt.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Types.h"
 
 #include <functional>
 #include <unordered_map>
@@ -25,6 +28,7 @@ struct InitKey {
     switch (type) {
     case TensorInitType::Random:
     case TensorInitType::Normal:
+    case TensorInitType::Quant:
       this->seed = seed;
       break;
     default:
@@ -67,6 +71,7 @@ TensorInitType parseTensorInitType(StringRef name) {
                   .Case("random", TensorInitType::Random)
                   .Case("normal", TensorInitType::Normal)
                   .Case("identity", TensorInitType::Identity)
+                  .Case("quant", TensorInitType::Quant)
                   .Default(TensorInitType::Invalid);
   return type;
 }
@@ -81,8 +86,11 @@ TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed) {
   }
 
   InitKey key(type, elmType, seed);
+  llvm::errs() << "type=" << static_cast<int>(type) << " elmType=" << elmType
+               << " seed=" << seed << "\n";
   if (tensorInitializers.find(key) != tensorInitializers.end())
     return tensorInitializers[key];
+  llvm::errs() << "getTensorInit::Creating new tensor initializer\n";
 
   TensorInitPtr initPtr = nullptr;
 
@@ -103,6 +111,20 @@ TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed) {
     case TensorInitType::Identity:
       initPtr = std::make_shared<IdentityTensorInitFloat>(dataType);
       break;
+    case TensorInitType::Quant: {
+      llvm::errs() << "TensorInitFloat::getTensorInit()\n";
+      // auto floatInit = std::make_shared<QuantTensorInitFloat>(dataType,
+      // seed);
+      initPtr = std::make_shared<QuantTensorInitFloat>(dataType, seed);
+      // initPtr = std::make_shared<QuantTensorInitInt>(
+      //     static_cast<TensorInitInt::DataType>(dataType), seed,
+      //     floatInit.get());
+      // tensorInitializers[key] = floatInit; // Store the float initializer
+      break;
+    }
+    case TensorInitType::Zero:
+      initPtr = std::make_shared<ZeroTensorInitFloat>(dataType);
+      break;
     default:
       assert(false && "Invalid tensor initializer type");
     }
@@ -122,6 +144,19 @@ TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed) {
       assert(seed && "Can't call random initializers without seed");
       initPtr = std::make_shared<NormalTensorInitInt>(dataType, seed);
       break;
+    case TensorInitType::Quant: {
+      llvm::errs() << "TensorInitInt::getTensorInit()\n";
+      assert(seed && "Can't call random initializers without seed");
+      auto scaleDataType = static_cast<TensorInitFloat::DataType>(
+          TensorInitFloat::DataType::FP32);
+      auto floatInit =
+          std::make_shared<QuantTensorInitFloat>(scaleDataType, seed);
+      initPtr =
+          std::make_shared<QuantTensorInitInt>(dataType, seed, floatInit.get());
+      InitKey key1(type, mlir::Float32Type::get(elmType.getContext()), seed);
+      tensorInitializers[key1] = floatInit; // Store the float initializer
+      break;
+    }
     case TensorInitType::Identity:
       initPtr = std::make_shared<IdentityTensorInitInt>(dataType);
       break;

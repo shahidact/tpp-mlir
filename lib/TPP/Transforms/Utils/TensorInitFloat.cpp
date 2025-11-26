@@ -7,6 +7,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "TPP/Transforms/Utils/TensorInitFloat.h"
+#include "llvm/ADT/APFloat.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace mlir;
 
@@ -76,6 +78,97 @@ void NormalTensorInitFloat::fillData() {
     push(next());
 }
 
+// Compute a simple dynamic fixed point per channel quantization scale for the
+// 2-D flattened tensor data Find the max absolute value in the distribution
+// channel wise and use it to determine the unbiased exponent using frexp().
+std::vector<APFloat>
+QuantTensorInitFloat::computeReScales(const std::vector<float> &samples) {
+  llvm::errs() << "QuantTensorInitFloat::computeReScales\n";
+  std::vector<APFloat> channelwiseScales;
+  if (dims.size() != 1) {
+    llvm::errs()
+        << "QuantTensorInitInt::computeReScales only supports 1-D tensors\n";
+    return channelwiseScales;
+  }
+  size_t channels = dims[1]; // Assuming shape is [channelSize, channels]
+  size_t channelSize = dims[0];
+  channelwiseScales.resize(channels, APFloat(0.0f));
+
+  for (size_t c = 0; c < channels; c++) {
+    float maxAbsValue = 0.0f;
+    for (size_t i = 0; i < channelSize; i++) {
+      float value = samples[i * channels + c];
+      float absValue = std::abs(value);
+      if (absValue > maxAbsValue)
+        maxAbsValue = absValue;
+    }
+    int exponent;
+    if (maxAbsValue == 0.0f) {
+      exponent = 0; // Handle zero case
+    } else {
+      std::frexp(maxAbsValue, &exponent); // Get unbiased exponent
+    }
+    exponent = exponent - 7;
+    int intBits = exponent + 1; // +1 for sign bit
+    // APFloat(bitWidth, std::exp2(-(exponent)), isSigned);
+    channelwiseScales[c] = APFloat(static_cast<float>(std::exp2((exponent))));
+    llvm::errs() << "channelWiseScale[" << c << "]=" << channelwiseScales[c]
+                 << "\n";
+    llvm::errs() << "Channel " << c << ": maxAbsValue=" << maxAbsValue
+                 << ", exponent=" << exponent << ", intBits=" << intBits
+                 << "\n";
+  }
+  return channelwiseScales;
+}
+
+void QuantTensorInitFloat::fillData() {
+  llvm::errs() << "floatInt" << this << "\n";
+  llvm::errs() << "Buffer Size: " << buffer.size() << "\n";
+  // assert(buffer.size() > 0 && "Buffer is empty");
+  assert(scaleSamples.size() > 0 && "scaleSamples is empty");
+  llvm::errs() << "QuantTensorInitFloat::fillData()\n";
+  for (size_t i = 0; i < scaleSamples.size(); i++) {
+    llvm::errs() << "QuantTensorInitFloat::fillData() buffer[" << i
+                 << "]=" << scaleSamples[i] << "\n";
+    // push(next());
+    push(scaleSamples[i]);
+  }
+}
+
+// void QuantTensorInitFloat::fillData() {
+//   llvm::errs() << "QuantTensorInitFloat::fillData() implemented\n";
+//   assert(buffer.size() == 0 && "Buffer not empty");
+
+//   std::vector<float> samples;
+//   llvm::errs() << "Generating " << size << " samples\n";
+//   for (size_t i = 0; i < size; i++) {
+//     auto p = next();
+//     llvm::errs() << "Samples " << i << ": " << p << "\n";
+//     samples.push_back(p);
+//   }
+
+// Print the samples row-wise where dim[1] is the inner dimension
+// if (dims.size() == 2) {
+//   size_t channels = dims[1];
+//   size_t channelSize = dims[0];
+//   for (size_t i = 0; i < channelSize; i++) {
+//     llvm::errs() << "Row " << i << ": ";
+//     for (size_t c = 0; c < channels; c++) {
+//       llvm::errs() << samples[i * channels + c] << " ";
+//     }
+//     llvm::errs() << "\n";
+//   }
+// }
+
+//   // std::vector<APFloat> channelwiseScales = computeReScales(samples);
+
+//   // Quantize each sample using the channel-wise scale
+//   // std::vector<APInt> quantizedValues = quantizeDFP(samples,
+//   // channelwiseScales);
+//   // buffer = channelwiseScales;
+//   // buffer = std::vector<APInt>(size, APInt(bitWidth, 0, isSigned));
+// }
+
 void IdentityTensorInitFloat::fillData() {
   assert(buffer.size() == 0 && "Buffer not empty");
   APFloat zero = APFloat(0.0);
@@ -88,4 +181,11 @@ void IdentityTensorInitFloat::fillData() {
     size_t offset = i*ld + i;
     insert(offset, APFloat(1.0));
   }
+}
+
+void ZeroTensorInitFloat::fillData() {
+  assert(buffer.size() == 0 && "Buffer not empty");
+  APFloat zero = APFloat(0.0);
+  convertType(zero);
+  buffer.resize(size, zero);
 }

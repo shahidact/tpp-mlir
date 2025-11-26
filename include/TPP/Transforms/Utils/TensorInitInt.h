@@ -17,6 +17,7 @@
 #define TPP_TRANSFORMS_UTILS_TENSORINITINT_H
 
 #include "TPP/Transforms/Utils/TensorInit.h"
+#include "TPP/Transforms/Utils/TensorInitFloat.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Types.h"
 
@@ -147,6 +148,37 @@ struct IdentityTensorInitInt : TensorInitInt {
 
   // Return a diagonal of <1.0>s throughout the shape.
   void fillData() override;
+};
+
+struct QuantTensorInitFloat;
+// Random init (normal).
+struct QuantTensorInitInt : TensorInitInt {
+  QuantTensorInitInt(DataType type, int seed, QuantTensorInitFloat *floatInit)
+      : TensorInitInt(type), generator(seed), distribution(0.0, 0.2),
+        floatInit(floatInit) {}
+
+  // Next random number.
+  float next() {
+    auto value = distribution(generator);
+    return value;
+  }
+
+  // Return a dense<normal(0, distribution)> throughout the shape.
+  void fillData() override;
+
+  std::vector<int> computeScales(const std::vector<float> &samples);
+
+  std::vector<llvm::APInt>
+  quantizeDFP(const std::vector<float> &samples,
+              const std::vector<int> &channelwiseScales);
+
+private:
+  // Random generator.
+  std::default_random_engine generator;
+  // Random distribution.
+  std::normal_distribution<float> distribution;
+  // Pointer to the associated QuantTensorInitFloat instance
+  QuantTensorInitFloat *floatInit;
 };
 
 #endif // TPP_TRANSFORMS_UTILS_TENSORINITINT_H

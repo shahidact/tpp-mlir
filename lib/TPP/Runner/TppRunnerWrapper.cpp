@@ -24,6 +24,7 @@
 #include "TPP/Transforms/Utils/TensorInit.h"
 #include "TPP/Transforms/Utils/TensorInitFloat.h"
 #include "TPP/Transforms/Utils/TensorInitInt.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
 
@@ -51,12 +52,14 @@ struct TppRunnerWrapper
 
     // Randon options need seed.
     if (!seed && (randomSplat || tensorInitType == TensorInitType::Random ||
-                  tensorInitType == TensorInitType::Normal)) {
+                  tensorInitType == TensorInitType::Normal ||
+                  tensorInitType == TensorInitType::Quant)) {
       seed = std::time(0);
     }
 
     // Benchmark object.
-    MLIRBenchConfig config(seed, tensorInitType, identity, backend, offloadToDevice);
+    MLIRBenchConfig config(seed, tensorInitType, identity, zero, backend,
+                           offloadToDevice);
     MLIRBench bench(module, config);
 
     // Can only either print or run benchmarks, make this clear before we try to
@@ -114,11 +117,12 @@ struct TppRunnerWrapper
     // Print the kernel's input arguments by iterating through kernelArgs
     if (printInput) {
       for (auto arg : bench.getKernelArgs()) {
-        if (auto shapedType = dyn_cast<ShapedType>(arg.getType())) {
-          if (shapedType.getRank() == 1)
-            continue;
+        llvm::errs() << "Input Argument:\n";
+        if (auto shapedType = dyn_cast<ShapedType>(arg.first.getType())) {
+          // if (shapedType.getRank() == 1)
+          //   continue;
           if (shapedType.hasStaticShape())
-            if (failed(bench.printShapedType(arg)))
+            if (failed(bench.printShapedType(arg.first)))
               return;
         }
       }
