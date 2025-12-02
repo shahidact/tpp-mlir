@@ -159,6 +159,11 @@ MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
           .Default(QuantizationType::None);
   quantType = *optQuantType;
 
+  // const kernelType is only supported for non quantization kernel.
+  assert(!(kernelType == KernelType::Const &&
+           quantType == QuantizationType::Quant) &&
+         "Const kernel type is only supported for non quantization kernel");
+
   // Update output kind to 'contract' if quantization is enabled.
   if (quantType != QuantizationType::None)
     outputOpKind = OutputOpKind::Contract;

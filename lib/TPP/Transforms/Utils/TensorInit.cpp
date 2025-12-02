@@ -25,6 +25,7 @@ struct InitKey {
     switch (type) {
     case TensorInitType::Random:
     case TensorInitType::Normal:
+    case TensorInitType::Quant:
       this->seed = seed;
       break;
     default:
@@ -67,6 +68,7 @@ TensorInitType parseTensorInitType(StringRef name) {
                   .Case("random", TensorInitType::Random)
                   .Case("normal", TensorInitType::Normal)
                   .Case("identity", TensorInitType::Identity)
+                  .Case("quant", TensorInitType::Quant)
                   .Default(TensorInitType::Invalid);
   return type;
 }
@@ -103,6 +105,11 @@ TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed) {
     case TensorInitType::Identity:
       initPtr = std::make_shared<IdentityTensorInitFloat>(dataType);
       break;
+    case TensorInitType::Quant: {
+      llvm::errs() << "TensorInitFloat::getTensorInit()\n";
+      initPtr = std::make_shared<QuantTensorInitFloat>(dataType, seed);
+      break;
+    }
     default:
       assert(false && "Invalid tensor initializer type");
     }
@@ -125,6 +132,22 @@ TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed) {
     case TensorInitType::Identity:
       initPtr = std::make_shared<IdentityTensorInitInt>(dataType);
       break;
+    case TensorInitType::Quant: {
+      // Create a float initializer for the rescale values while creating
+      // the int initializer for the quantized argument and corresponding
+      // rescale factor.
+      assert(seed && "Can't call random initializers without seed");
+      auto scaleDataType = static_cast<TensorInitFloat::DataType>(
+          TensorInitFloat::DataType::FP32);
+      auto floatInit =
+          std::make_shared<QuantTensorInitFloat>(scaleDataType, seed);
+      initPtr =
+          std::make_shared<QuantTensorInitInt>(dataType, seed, floatInit.get());
+      InitKey keyScaleFloat(type, mlir::Float32Type::get(elmType.getContext()), seed);
+      // Store the float initializer for rescale value.
+      tensorInitializers[keyScaleFloat] = floatInit;
+      break;
+    }
     default:
       assert(false && "Invalid tensor initializer type");
     }

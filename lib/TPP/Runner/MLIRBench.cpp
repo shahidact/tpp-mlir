@@ -230,6 +230,13 @@ LogicalResult MLIRBench::createKernelArgs() {
         return module.emitError("Invalid shape for identity init");
       }
     }
+
+    // For quantized kernels output arguments, make the init type normal.
+    if (kernel.getArgumentTypes().size() - 1 == static_cast<size_t>(argNum) &&
+        argInitType == TensorInitType::Quant) {
+      argInitType = TensorInitType::Normal;
+    }
+
     auto arg =
         TypeSwitch<Type, std::optional<Value>>(ty)
             .Case<MemRefType>([&](auto memRefTy) {

@@ -63,6 +63,8 @@ protected:
   size_t size;
   // Data pointer
   std::vector<T> buffer;
+  // Temporary storage for scale for quantized arguments
+  std::vector<T> scaleBuffer;
 
   // Check the shape and fill the internal structure
   virtual bool checkShape(mlir::ShapedType shape) {
@@ -103,6 +105,7 @@ enum class TensorInitType {
   Random,
   Normal,
   Identity,
+  Quant,
   Invalid
 };
 
