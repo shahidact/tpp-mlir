@@ -186,7 +186,7 @@ void QuantTensorInitInt::fillData() {
   // Random float samples to be quantized.
   std::vector<float> samples;
   for (size_t i = 0; i < size; i++) {
-    auto p = next();
+    auto p = distribution(generator);
     samples.push_back(p);
   }
 

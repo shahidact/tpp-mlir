@@ -107,7 +107,7 @@ TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed) {
       break;
     case TensorInitType::Quant: {
       llvm::errs() << "TensorInitFloat::getTensorInit()\n";
-      initPtr = std::make_shared<QuantTensorInitFloat>(dataType, seed);
+      initPtr = std::make_shared<QuantScaleTensorInitFloat>(dataType, seed);
       break;
     }
     default:
@@ -139,7 +139,7 @@ TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed) {
       assert(seed && "Can't call random initializers without seed");
       auto scaleDataType = static_cast<TensorInitFloat::DataType>(
           TensorInitFloat::DataType::FP32);
-      auto floatInit = std::make_shared<QuantTensorInitFloat>(
+      auto floatInit = std::make_shared<QuantScaleTensorInitFloat>(
           static_cast<TensorInitFloat::DataType>(scaleDataType), seed);
       initPtr = std::make_shared<QuantTensorInitInt>(dataType, seed, floatInit);
       // Store the float initializer for rescale value into hash.

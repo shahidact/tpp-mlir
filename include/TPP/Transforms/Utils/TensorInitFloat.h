@@ -157,8 +157,8 @@ struct IdentityTensorInitFloat : TensorInitFloat {
 };
 
 // Random init (Quant).
-struct QuantTensorInitFloat : TensorInitFloat {
-  QuantTensorInitFloat(DataType type, int seed)
+struct QuantScaleTensorInitFloat : TensorInitFloat {
+  QuantScaleTensorInitFloat(DataType type, int seed)
       : TensorInitFloat(type), generator(seed), distribution(0.0, 0.2) {}
 
   // Method to update the buffer externally

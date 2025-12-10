@@ -232,7 +232,10 @@ LogicalResult MLIRBench::createKernelArgs() {
     }
 
     // For quantized kernels output arguments, make the init type normal.
-    if (kernel.getArgumentTypes().size() - 1 == static_cast<size_t>(argNum) &&
+    auto funcType = kernel.getFunctionType();
+    auto numOutputs = funcType.getNumResults();
+    if (kernel.getArgumentTypes().size() - numOutputs ==
+            static_cast<size_t>(argNum) &&
         argInitType == TensorInitType::Quant) {
       argInitType = TensorInitType::Normal;
     }
@@ -390,7 +393,9 @@ LogicalResult MLIRBench::printShapedType(mlir::Value val) {
   // Loop body
   auto beginIdx = loop.getInductionVar();
   auto vector = builder.create<vector::TransferReadOp>(
-      unkLoc, vecType, val, ValueRange{beginIdx, zero}, undefLengthCst);
+      unkLoc, vecType, val,
+      rank == 1 ? ValueRange{beginIdx} : ValueRange{beginIdx, zero},
+      undefLengthCst);
   printVector(vector);
 
   // Finally lower to LLVM Dialect
