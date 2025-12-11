@@ -208,6 +208,6 @@ void QuantTensorInitInt::fillData() {
     for (size_t i = 0; i < channelwiseScales.size(); i++) {
       rescales.emplace_back(static_cast<float>(1.0f / channelwiseScales[i]));
     }
-    floatInit->updateRescaleBuffer(rescales);
+    floatInit->setScaleBuffer(rescales);
   }
 }

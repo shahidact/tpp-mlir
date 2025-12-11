@@ -161,8 +161,8 @@ struct QuantScaleTensorInitFloat : TensorInitFloat {
   QuantScaleTensorInitFloat(DataType type, int seed)
       : TensorInitFloat(type), generator(seed), distribution(0.0, 0.2) {}
 
-  // Method to update the buffer externally
-  void updateRescaleBuffer(const std::vector<llvm::APFloat> &newBuffer) {
+  // Method to set scale buffer.
+  void setScaleBuffer(const std::vector<llvm::APFloat> &newBuffer) {
     scaleBuffer = newBuffer;
   }
 
@@ -173,6 +173,8 @@ struct QuantScaleTensorInitFloat : TensorInitFloat {
   void fillData() override;
 
 private:
+  // Scale buffer corresponding to quantized arguments.
+  std::vector<llvm::APFloat> scaleBuffer;
   // Random generator.
   std::default_random_engine generator;
   // Random distribution.
