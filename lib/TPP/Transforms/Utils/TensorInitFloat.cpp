@@ -89,3 +89,11 @@ void IdentityTensorInitFloat::fillData() {
     insert(offset, APFloat(1.0));
   }
 }
+
+// Update internal buffer with rescale values.
+void QuantScaleTensorInitFloat::fillData() {
+  assert(scaleBuffer.size() > 0 && "scaleBuffer is empty");
+  for (size_t i = 0; i < scaleBuffer.size(); i++) {
+    push(scaleBuffer[i]);
+  }
+}

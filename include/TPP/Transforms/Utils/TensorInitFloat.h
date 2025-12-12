@@ -18,6 +18,7 @@
 #include "TPP/Transforms/Utils/TensorInit.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Types.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
 #include <random>
@@ -153,6 +154,31 @@ struct IdentityTensorInitFloat : TensorInitFloat {
 
   // Return a diagonal of <1.0>s throughout the shape.
   void fillData() override;
+};
+
+// Random init (Quant).
+struct QuantScaleTensorInitFloat : TensorInitFloat {
+  QuantScaleTensorInitFloat(DataType type, int seed)
+      : TensorInitFloat(type), generator(seed), distribution(0.0, 0.2) {}
+
+  // Method to set scale buffer.
+  void setScaleBuffer(const std::vector<llvm::APFloat> &newBuffer) {
+    scaleBuffer = newBuffer;
+  }
+
+  // Should not be called.
+  float next() { assert(false && "Should not be called"); }
+
+  // Update internal buffer with rescale.
+  void fillData() override;
+
+private:
+  // Scale buffer corresponding to quantized arguments.
+  std::vector<llvm::APFloat> scaleBuffer;
+  // Random generator.
+  std::default_random_engine generator;
+  // Random distribution.
+  std::normal_distribution<float> distribution;
 };
 
 #endif // TPP_TRANSFORMS_UTILS_TENSORINITFLOAT_H

@@ -115,8 +115,6 @@ struct TppRunnerWrapper
     if (printInput) {
       for (auto arg : bench.getKernelArgs()) {
         if (auto shapedType = dyn_cast<ShapedType>(arg.getType())) {
-          if (shapedType.getRank() == 1)
-            continue;
           if (shapedType.hasStaticShape())
             if (failed(bench.printShapedType(arg)))
               return;

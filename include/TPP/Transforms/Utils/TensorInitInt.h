@@ -149,4 +149,38 @@ struct IdentityTensorInitInt : TensorInitInt {
   void fillData() override;
 };
 
+struct QuantScaleTensorInitFloat;
+// Random init (normal).
+struct QuantTensorInitInt : TensorInitInt {
+  QuantTensorInitInt(DataType type, int seed,
+                     std::shared_ptr<QuantScaleTensorInitFloat> floatInit)
+      : TensorInitInt(type), generator(seed), distribution(0.0, 0.2),
+        floatInit(floatInit) {}
+
+  // Indicate which matrix it being initialized, input or weight
+  bool isInputMatrix = true;
+
+  // Should not be called.
+  float next() { assert(false && "Should not be called"); }
+
+  // Return a dense<normal(0, distribution)> throughout the shape.
+  void fillData() override;
+
+  std::vector<int> computeScales(const std::vector<float> &samples,
+                                 bool isRowWiseReduce = true);
+
+  std::vector<llvm::APInt>
+  quantizeDFP(const std::vector<float> &samples,
+              const std::vector<int> &channelwiseScales,
+              bool isRowWiseReduce = true);
+
+private:
+  // Random generator.
+  std::default_random_engine generator;
+  // Random distribution.
+  std::normal_distribution<float> distribution;
+  // Shared pointer to the associated QuantScaleTensorInitFloat instance
+  std::shared_ptr<QuantScaleTensorInitFloat> floatInit;
+};
+
 #endif // TPP_TRANSFORMS_UTILS_TENSORINITINT_H

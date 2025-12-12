@@ -103,6 +103,7 @@ enum class TensorInitType {
   Random,
   Normal,
   Identity,
+  Quant,
   Invalid
 };
 
