@@ -168,7 +168,7 @@ MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
 
   // Update output kind to 'contract' if quantization is enabled.
   if (quantType != QuantizationType::None)
-    outputOpKind = OutputOpKind::Contract;
+  outputOpKind = OutputOpKind::Contract;
 
   // Disable VNNI packing if it is not a F16/BF16/I8 data type
   if (!dataTypes[0].isBF16() && !dataTypes[0].isF16() &&
@@ -866,16 +866,16 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
 
   // If contract output is integer and scale type is float, Perform
   // elementwise cast of contract from integer to float.
-  auto castedOutput =
+auto castedOutput =
       builder.create<tensor::EmptyOp>(loc, outputScaleTy, ValueRange{});
   if (outputShapedTy.getElementType().isInteger() && dataTypes[2].isFloat()) {
-    // Elementwise sitofp cast using linalg.generic
+        // Elementwise sitofp cast using linalg.generic
     chain =
         builder
             .create<linalg::GenericOp>(
                 loc, outputScaleTy, ValueRange{chain}, ValueRange{castedOutput},
                 ArrayRef<AffineMap>{getMap(chain, MAP_PARALLEL),
-                                    getMap(castedOutput, MAP_PARALLEL)},
+                    getMap(castedOutput, MAP_PARALLEL)},
                 getIterators(MAP_PARALLEL),
                 [&](OpBuilder &nestedBuilder, Location nestedLoc,
                     ValueRange blockArgs) {
@@ -891,8 +891,8 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
   // Multiply the contract output with the output scale factor
   chain = builder
               .create<linalg::MulOp>(loc, TypeRange{castedOutput.getType()},
-                                     ValueRange{chain, dotProduct},
-                                     ValueRange{castedOutput})
+                  ValueRange{chain, dotProduct},
+                  ValueRange{castedOutput})
               .getResult(0);
 
   // TODO: A place holder for flops computation for dequantization.
