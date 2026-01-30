@@ -866,7 +866,7 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
 
   // If contract output is integer and scale type is float, Perform
   // elementwise cast of contract from integer to float.
-auto castedOutput =
+  auto castedOutput =
       builder.create<tensor::EmptyOp>(loc, outputScaleTy, ValueRange{});
   if (outputShapedTy.getElementType().isInteger() && dataTypes[2].isFloat()) {
         // Elementwise sitofp cast using linalg.generic
