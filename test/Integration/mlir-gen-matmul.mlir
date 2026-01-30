@@ -13,6 +13,7 @@
 // RUN: mlir-gen --kernel=args --seed=0 --float-type=mx-bf16 --batch=128 --layers=2304,768 --quant-type=dequantize 2>&1 | FileCheck %s --check-prefix=MXBF16-DEQUANT
 // RUN: mlir-gen --kernel=args --seed=0 --float-type=mx-i8-f32 --batch=128 --layers=2304,768 --quant-type=dequantize 2>&1 | FileCheck %s --check-prefix=MXI8F32-DEQUANT
 // RUN: mlir-gen --kernel=args --seed=0 --float-type=mx-f32-i8 --batch=128 --layers=2304,768 --quant-type=quantize 2>&1 | FileCheck %s --check-prefix=MXF32I8-QUANT
+// RUN: mlir-gen --kernel=args --seed=0 --float-type=mx-i8-f32 --batch=4096 --layers=8192,4096 --quant-type=dequantize --output=generic --tiles=32,32,64 --vnni=4 2>&1 | FileCheck %s --check-prefix=MXI8F32-PACKED-DEQUANT
 
 
 // FP32: // RUN{{.*}}tpp-run %s -n {{\d*}}
@@ -156,7 +157,7 @@
 // MXBF16-DEQUANT-SAME:                     %arg2: tensor<2304x768xbf16>,
 // MXBF16-DEQUANT-SAME:                     %arg3: tensor<768xf32>,
 // MXBF16-DEQUANT-SAME:                     %arg4: tensor<128x768xf32>) -> tensor<128x768xf32> {
-// MXBF16-DEQUANT:           linalg.contract indexing_maps = [#map, #map1, #map2]
+// MXBF16-DEQUANT:           linalg.generic {indexing_maps = [#map, #map1, #map2]
 // MXBF16-DEQUANT:           linalg.generic  {{.*}} iterator_types = ["parallel", "parallel"]
 // MXBF16-DEQUANT:             arith.mulf
 // MXBF16-DEQUANT:           linalg.mul
@@ -174,7 +175,7 @@
 // MXI8F32-DEQUANT-SAME:                     %arg2: tensor<2304x768xi8>,
 // MXI8F32-DEQUANT-SAME:                     %arg3: tensor<768xf32>,
 // MXI8F32-DEQUANT-SAME:                     %arg4: tensor<128x768xf32>) -> tensor<128x768xf32> {
-// MXI8F32-DEQUANT:           linalg.contract indexing_maps = [#map, #map1, #map2]
+// MXI8F32-DEQUANT:           linalg.generic {indexing_maps = [#map, #map1, #map2]
 // MXI8F32-DEQUANT:           linalg.generic  {{.*}} iterator_types = ["parallel", "parallel"]
 // MXI8F32-DEQUANT:             arith.mulf
 // MXI8F32-DEQUANT:           linalg.mul
@@ -191,7 +192,7 @@
 // MXF32I8-QUANT-SAME:                     %[[ARG0:.*]]: tensor<128x2304xf32>,
 // MXF32I8-QUANT-SAME:                     %[[ARG1:.*]]: tensor<2304x768xf32>,
 // MXF32I8-QUANT-SAME:                     %[[ARG2:.*]]: tensor<128x768xi8>) -> tensor<128x768xi8> {
-// MXF32I8-QUANT:           linalg.contract indexing_maps = [#map, #map1, #map2]
+// MXF32I8-QUANT:           linalg.generic {indexing_maps = [#map, #map1, #map2]
 // MXF32I8-QUANT:           linalg.reduce {{.*}} dimensions = [0]
 // MXF32I8-QUANT:               math.absf
 // MXF32I8-QUANT:               arith.maximumf
@@ -208,3 +209,38 @@
 // MXF32I8-QUANT:           linalg.mul
 // MXF32I8-QUANT:           linalg.generic
 // MXF32I8-QUANT:               arith.fptosi
+
+
+// MXI8F32-PACKED-DEQUANT: #[[$ATTR_0:.+]] = affine_map<(d0, d1, d2, d3, d4, d5, d6) -> (d0, d2, d4, d6, d3)>
+// MXI8F32-PACKED-DEQUANT: #[[$ATTR_1:.+]] = affine_map<(d0, d1, d2, d3, d4, d5, d6) -> (d1, d2, d6, d5, d3)>
+// MXI8F32-PACKED-DEQUANT: #[[$ATTR_2:.+]] = affine_map<(d0, d1, d2, d3, d4, d5, d6) -> (d0, d1, d4, d5)>
+// MXI8F32-PACKED-DEQUANT: #[[$ATTR_3:.+]] = affine_map<(d0, d1) -> (d0)>
+// MXI8F32-PACKED-DEQUANT: #[[$ATTR_4:.+]] = affine_map<(d0, d1) -> (d1)>
+// MXI8F32-PACKED-DEQUANT: #[[$ATTR_5:.+]] = affine_map<(d0, d1) -> (d0, d1)>
+// MXI8F32-PACKED-DEQUANT: #[[$ATTR_6:.+]] = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+// MXI8F32-PACKED-DEQUANT-LABEL:   func.func @entry(
+// MXI8F32-PACKED-DEQUANT-SAME:                     {{.*}}: tensor<128x128x32x64xi8>,
+// MXI8F32-PACKED-DEQUANT-SAME:                     {{.*}}: tensor<4096xf32>, {{.*}}: tensor<128x128x16x32x4xi8>,
+// MXI8F32-PACKED-DEQUANT-SAME:                     {{.*}}: tensor<4096xf32>,
+// MXI8F32-PACKED-DEQUANT-SAME:                     {{.*}}: tensor<128x128x32x32xf32>) -> tensor<128x128x32x32xf32> {
+
+// MXI8F32-PACKED-DEQUANT:           linalg.fill
+// MXI8F32-PACKED-DEQUANT:           tensor.expand_shape
+// MXI8F32-PACKED-DEQUANT:           linalg.generic
+// MXI8F32-PACKED-DEQUANT:           ^bb0
+// MXI8F32-PACKED-DEQUANT:             arith.extsi
+// MXI8F32-PACKED-DEQUANT:             arith.extsi
+// MXI8F32-PACKED-DEQUANT:             arith.muli
+// MXI8F32-PACKED-DEQUANT:             arith.addi
+// MXI8F32-PACKED-DEQUANT:             linalg.yield
+// MXI8F32-PACKED-DEQUANT:           linalg.generic
+// MXI8F32-PACKED-DEQUANT:           ^bb0
+// MXI8F32-PACKED-DEQUANT:             arith.mulf
+// MXI8F32-PACKED-DEQUANT:             linalg.yield
+// MXI8F32-PACKED-DEQUANT:           linalg.pack
+// MXI8F32-PACKED-DEQUANT:           linalg.generic
+// MXI8F32-PACKED-DEQUANT:           ^bb0
+// MXI8F32-PACKED-DEQUANT:             arith.sitofp
+// MXI8F32-PACKED-DEQUANT:             linalg.yield
+// MXI8F32-PACKED-DEQUANT:           linalg.mul
+// MXI8F32-PACKED-DEQUANT:           return
