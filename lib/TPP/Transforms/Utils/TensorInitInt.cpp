@@ -102,6 +102,31 @@ void IdentityTensorInitInt::fillData() {
   }
 }
 
+namespace {
+// Compute rows and columns for the collapsed 2-D matrix from the original
+// tensor dimensions.
+static void getUnpackedShapeFromDims(const std::vector<float> &samples,
+                                     const std::vector<size_t> &dims,
+                                     bool isRowWiseReduce, size_t &rows,
+                                     size_t &columns) {
+  // Compute full size of the matrix by collapsing all dimensions
+  size_t fullSize = 1;
+  for (size_t i = 0; i < dims.size(); i++)
+    fullSize *= dims[i];
+  assert(fullSize == samples.size() && "Mismatch in samples size");
+
+  // Initialize rows computing the product of collapsed outer dimension sizes
+  // chosen based on reduction dimension.
+  if (dims.size() > 2)
+    rows = isRowWiseReduce ? dims[0] * dims[2] : dims[1] * dims[2] * dims[4];
+  else if (dims.size() == 2)
+    rows = dims[0];
+
+  // Initialize column size by factoring out the row size.
+  columns = fullSize / rows;
+}
+} // namespace
+
 // Compute a simple dynamic fixed point per channel(row or column) quantization
 // scale for the 2-D flattened tensor data or packed data.Find the max absolute
 // value in the distribution channel wise and use it to determine the unbiased
@@ -113,26 +138,10 @@ QuantTensorInitInt::computeScales(const std::vector<float> &samples,
   assert(dims.size() >= 2 && dims.size() <= 5 &&
          "Only 2D for unpacked and <=5D for packed tensor dims are supported");
 
-  // Compute full size of the matrix by collapsing all dimensions
-  size_t fullSize = 1;
-  for (size_t i = 0; i < dims.size(); i++)
-    fullSize *= dims[i];
-  assert(fullSize == samples.size() && "Mismatch in samples size");
-
-  // Initialize rows computing the product of collapsed outer dimension sizes
-  // chosen based on reduction dimension.'isRowWiseReduce = True' implies input
-  // matrix reduction along columns and vice versa for weight matrix.
-  size_t rows = 1;
-  if (dims.size() > 2)
-    rows = isRowWiseReduce ? dims[0] * dims[2] : dims[1] * dims[2] * dims[4];
-  else if (dims.size() == 2)
-    rows = dims[0];
-
-  // Initialize column size by factoring out the row size.
-  size_t columns = fullSize / rows;
+  size_t rows = 1, columns = 1;
+  getUnpackedShapeFromDims(samples, dims, isRowWiseReduce, rows, columns);
   size_t reductionDimSize = isRowWiseReduce ? rows : columns;
   size_t nonReductionDimSize = isRowWiseReduce ? columns : rows;
-
   channelwiseScales.resize(isRowWiseReduce ? rows : columns, 0);
 
   for (size_t c = 0; c < reductionDimSize; c++) {
@@ -170,22 +179,8 @@ QuantTensorInitInt::quantizeDFP(const std::vector<float> &samples,
   assert(dims.size() >= 2 && dims.size() <= 5 &&
          "Only 2D for unpacked and <=5D for packed tensor dims are supported");
 
-  // Compute full size of the matrix by collapsing all dimensions
-  size_t fullSize = 1;
-  for (size_t i = 0; i < dims.size(); i++)
-    fullSize *= dims[i];
-  assert(fullSize == samples.size() && "Mismatch in samples size");
-
-  // Initialize rows computing the product ofcollapsed outer dimension sizes
-  // chosedn based on reduction dimension.
-  size_t rows = 1;
-  if (dims.size() > 2)
-    rows = isRowWiseReduce ? dims[0] * dims[2] : dims[1] * dims[2] * dims[4];
-  else if (dims.size() == 2)
-    rows = dims[0];
-
-  // Initialize column size by factoring out the row size.
-  size_t columns = fullSize / rows;
+  size_t rows = 1, columns = 1;
+  getUnpackedShapeFromDims(samples, dims, isRowWiseReduce, rows, columns);
   size_t reductionDimSize = isRowWiseReduce ? rows : columns;
   size_t nonReductionDimSize = isRowWiseReduce ? columns : rows;
   quantizedValues.resize(samples.size(), APInt(bitWidth, 0, isSigned));

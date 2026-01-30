@@ -168,7 +168,7 @@ MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
 
   // Update output kind to 'contract' if quantization is enabled.
   if (quantType != QuantizationType::None)
-  outputOpKind = OutputOpKind::Contract;
+    outputOpKind = OutputOpKind::Contract;
 
   // Disable VNNI packing if it is not a F16/BF16/I8 data type
   if (!dataTypes[0].isBF16() && !dataTypes[0].isF16() &&
