@@ -869,13 +869,13 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
   auto castedOutput =
       builder.create<tensor::EmptyOp>(loc, outputScaleTy, ValueRange{});
   if (outputShapedTy.getElementType().isInteger() && dataTypes[2].isFloat()) {
-        // Elementwise sitofp cast using linalg.generic
+    // Elementwise sitofp cast using linalg.generic
     chain =
         builder
             .create<linalg::GenericOp>(
                 loc, outputScaleTy, ValueRange{chain}, ValueRange{castedOutput},
                 ArrayRef<AffineMap>{getMap(chain, MAP_PARALLEL),
-                    getMap(castedOutput, MAP_PARALLEL)},
+                                    getMap(castedOutput, MAP_PARALLEL)},
                 getIterators(MAP_PARALLEL),
                 [&](OpBuilder &nestedBuilder, Location nestedLoc,
                     ValueRange blockArgs) {
@@ -891,8 +891,8 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
   // Multiply the contract output with the output scale factor
   chain = builder
               .create<linalg::MulOp>(loc, TypeRange{castedOutput.getType()},
-                  ValueRange{chain, dotProduct},
-                  ValueRange{castedOutput})
+                                     ValueRange{chain, dotProduct},
+                                     ValueRange{castedOutput})
               .getResult(0);
 
   // TODO: A place holder for flops computation for dequantization.
