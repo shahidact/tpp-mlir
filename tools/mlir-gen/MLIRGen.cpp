@@ -133,6 +133,8 @@ MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
                                                  builder.getF32Type()})
           .CaseLower("mx-i8", SmallVector<Type>{builder.getIntegerType(8),
                                                 builder.getI32Type()})
+          .CaseLower("mx-i8-i32", SmallVector<Type>{builder.getIntegerType(8),
+                                                    builder.getI32Type()})
           .CaseLower("mx-i8-f32", SmallVector<Type>{builder.getIntegerType(8),
                                                     builder.getF32Type()})
           .CaseLower("mx-f32-i8", SmallVector<Type>{builder.getF32Type(),
@@ -168,8 +170,9 @@ MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
   if (quantType != QuantizationType::None)
     outputOpKind = OutputOpKind::Contract;
 
-  // Disable VNNI packing if it is not a F16/BF16 data type
-  if (!dataTypes[0].isBF16() && !dataTypes[0].isF16())
+  // Disable VNNI packing if it is not a F16/BF16/I8 data type
+  if (!dataTypes[0].isBF16() && !dataTypes[0].isF16() &&
+      !dataTypes[0].isInteger(8))
     vnniFactor = 0;
   assert(((vnniFactor >= 0) && (vnniFactor % 2 == 0)) &&
          "Invalid VNNI packing factor");
@@ -1145,9 +1148,9 @@ TensorType MLIRGenerator::getShape(ArrayRef<int64_t> dims, PackingType type) {
     assert(y % k == 0 && "Invalid tile size for K dim");
     return RankedTensorType::get({x / n, y / k, n, k}, dataTypes[1]);
   case INPUT_SCALE:
-    return RankedTensorType::get({n}, dataTypes[2]);
+    return RankedTensorType::get({dims[0]}, dataTypes[2]);
   case WEIGHT_SCALE:
-    return RankedTensorType::get({k}, dataTypes[2]);
+    return RankedTensorType::get({dims[0]}, dataTypes[2]);
   case PACK_INTERMEDIATE:
     llvm_unreachable("Unknown intermediate packing type");
   }
