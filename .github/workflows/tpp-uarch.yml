@@ -1,0 +1,35 @@
+name: TPP-MLIR uArch Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'main'
+
+env:
+  SRUN: ${HOME}/srun.sh
+
+jobs:
+  Check_LLVM:
+    uses: ./.github/workflows/tpp-llvm.yml
+    secrets: inherit
+
+  TPP-MLIR-SRF:
+    runs-on: pcl-tiergarten
+    needs: Check_LLVM
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clang Release
+        run: "${{ env.SRUN }} --partition=srf --time=0:30:00 -- \
+            'KIND=Release COMPILER=clang LINKER=lld CHECK=1 NPROCS_LIMIT_LINK=8 \
+            ${{ github.workspace }}/scripts/github/build_tpp.sh'"
+
+  TPP-MLIR-LNL:
+    runs-on: pcl-tiergarten
+    needs: Check_LLVM
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clang Release
+        run: "${{ env.SRUN }} --partition=lnl --time=0:30:00 -- \
+            'KIND=Release COMPILER=clang LINKER=lld CHECK=1 NPROCS_LIMIT_LINK=2 \
+            ${{ github.workspace }}/scripts/github/build_tpp.sh'"
