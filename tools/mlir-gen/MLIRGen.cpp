@@ -65,6 +65,26 @@ static SmallVector<bool> getBroadcastDims(ArrayRef<int64_t> sourceShape,
   return broadcastDims;
 }
 
+// Helper function to create the pack operation.
+static Value toPackLayoutImpl(OpBuilder &builder, Location loc, Value input,
+                              ArrayRef<OpFoldResult> tiles,
+                              ArrayRef<int64_t> innerDimsPos,
+                              ArrayRef<int64_t> outerDimsPerm) {
+  SmallVector<Value> dynamicTiles;
+  SmallVector<int64_t> staticTiles;
+  dispatchIndexOpFoldResults(tiles, dynamicTiles, staticTiles);
+  RankedTensorType result =
+      linalg::PackOp::inferPackedType(cast<RankedTensorType>(input.getType()),
+                                      staticTiles, innerDimsPos, outerDimsPerm);
+  auto inputType = cast<RankedTensorType>(input.getType());
+  ArrayRef<int64_t> shape = result.getShape();
+  Value output =
+      builder.create<tensor::EmptyOp>(loc, shape, inputType.getElementType());
+  return builder.create<linalg::PackOp>(loc, input, output, innerDimsPos, tiles,
+                                        /*paddingValue=*/std::nullopt,
+                                        outerDimsPerm);
+}
+
 } // anonymous namespace
 
 MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
@@ -168,7 +188,7 @@ MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
 
   // Update output kind to 'contract' if quantization is enabled.
   if (quantType != QuantizationType::None)
-    outputOpKind = OutputOpKind::Contract;
+    outputOpKind = OutputOpKind::Generic;
 
   // Disable VNNI packing if it is not a F16/BF16/I8 data type
   if (!dataTypes[0].isBF16() && !dataTypes[0].isF16() &&
@@ -518,6 +538,17 @@ Value MLIRGenerator::lowerMatmul(LayerArgs &args, bool hasMixedType = false) {
   // For quant, derive the output type from input type.
   if (quantType == QuantizationType::Quant)
     output = getZeroInitTensor(contractOutputTy);
+  if (quantType == QuantizationType::Dequant && hasMixedType &&
+      inputType.getElementType().isInteger(8)) {
+    Value zeroVal = builder.create<arith::ConstantIntOp>(loc, 0, 32);
+    output =
+        builder
+            .create<tensor::EmptyOp>(
+                loc, RankedTensorType::get(shape, builder.getIntegerType(32)),
+                ValueRange{})
+            .getResult();
+    output = builder.create<linalg::FillOp>(loc, zeroVal, output).getResult(0);
+  }
 
   if (vnniPacked) {
     SmallVector<int64_t> vnniShape{inputType.getShape()};
@@ -830,6 +861,7 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
   auto outputScaleTy = RankedTensorType::get(outputScaleShape, dataTypes[2]);
   auto inputShapedTy = cast<ShapedType>(input.getType());
   auto outputShapedTy = cast<ShapedType>(output.getType());
+  auto chainShapedTy = cast<ShapedType>(chain.getType());
 
   // Create a dot product of input and weight scales
   auto dim0 = getAffineDimExpr(0, ctx);
@@ -864,18 +896,24 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
               })
           .getResult(0);
 
+  // Pack the output scale if needed to match contract output shape
+  if (tiles.size() > 0) {
+    SmallVector<OpFoldResult> tilesOpFoldResult =
+        getAsIndexOpFoldResult(builder.getContext(), {tiles[0], tiles[1]});
+    dotProduct = toPackLayoutImpl(builder, loc, dotProduct, tilesOpFoldResult,
+                                  SmallVector<int64_t>{0, 1}, {});
+  }
+
   // If contract output is integer and scale type is float, Perform
   // elementwise cast of contract from integer to float.
-  auto castedOutput =
-      builder.create<tensor::EmptyOp>(loc, outputScaleTy, ValueRange{});
-  if (outputShapedTy.getElementType().isInteger() && dataTypes[2].isFloat()) {
+  if (chainShapedTy.getElementType().isInteger() && dataTypes[2].isFloat()) {
     // Elementwise sitofp cast using linalg.generic
     chain =
         builder
             .create<linalg::GenericOp>(
-                loc, outputScaleTy, ValueRange{chain}, ValueRange{castedOutput},
+                loc, outputShapedTy, ValueRange{chain}, ValueRange{output},
                 ArrayRef<AffineMap>{getMap(chain, MAP_PARALLEL),
-                                    getMap(castedOutput, MAP_PARALLEL)},
+                                    getMap(output, MAP_PARALLEL)},
                 getIterators(MAP_PARALLEL),
                 [&](OpBuilder &nestedBuilder, Location nestedLoc,
                     ValueRange blockArgs) {
@@ -890,9 +928,9 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
 
   // Multiply the contract output with the output scale factor
   chain = builder
-              .create<linalg::MulOp>(loc, TypeRange{castedOutput.getType()},
+              .create<linalg::MulOp>(loc, TypeRange{outputShapedTy},
                                      ValueRange{chain, dotProduct},
-                                     ValueRange{castedOutput})
+                                     ValueRange{output})
               .getResult(0);
 
   // TODO: A place holder for flops computation for dequantization.
