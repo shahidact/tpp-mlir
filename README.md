@@ -15,8 +15,6 @@ If you have a checkout with the previous name, please follow [these instructions
 
 [![TPP-MLIR Benchmarks](https://github.com/plaidml/tpp-mlir/actions/workflows/tpp-benchmark.yml/badge.svg)](https://github.com/plaidml/tpp-mlir/actions/workflows/tpp-benchmark.yml)
 
-[![TPP-MLIR uArch Tests](https://github.com/libxsmm/tpp-mlir/actions/workflows/tpp-uarch.yml/badge.svg)](https://github.com/libxsmm/tpp-mlir/actions/workflows/tpp-uarch.yml)
-
 [![TPP-MLIR Arm Graviton 3](https://github.com/libxsmm/tpp-mlir/actions/workflows/tpp-graviton.yml/badge.svg)](https://github.com/libxsmm/tpp-mlir/actions/workflows/tpp-graviton.yml)
 
 ## How to setup the environment
