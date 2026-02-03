@@ -211,13 +211,13 @@
 // MXF32I8-QUANT:               arith.fptosi
 
 
-// MXI8F32-PACKED-DEQUANT: #[[$ATTR_0:.+]] = affine_map<(d0, d1, d2, d3, d4, d5, d6) -> (d0, d2, d4, d6, d3)>
-// MXI8F32-PACKED-DEQUANT: #[[$ATTR_1:.+]] = affine_map<(d0, d1, d2, d3, d4, d5, d6) -> (d1, d2, d6, d5, d3)>
-// MXI8F32-PACKED-DEQUANT: #[[$ATTR_2:.+]] = affine_map<(d0, d1, d2, d3, d4, d5, d6) -> (d0, d1, d4, d5)>
-// MXI8F32-PACKED-DEQUANT: #[[$ATTR_3:.+]] = affine_map<(d0, d1) -> (d0)>
-// MXI8F32-PACKED-DEQUANT: #[[$ATTR_4:.+]] = affine_map<(d0, d1) -> (d1)>
-// MXI8F32-PACKED-DEQUANT: #[[$ATTR_5:.+]] = affine_map<(d0, d1) -> (d0, d1)>
-// MXI8F32-PACKED-DEQUANT: #[[$ATTR_6:.+]] = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+// MXI8F32-PACKED-DEQUANT: #map = affine_map<(d0, d1, d2, d3, d4, d5, d6) -> (d0, d2, d4, d6, d3)>
+// MXI8F32-PACKED-DEQUANT: #map1 = affine_map<(d0, d1, d2, d3, d4, d5, d6) -> (d1, d2, d6, d5, d3)>
+// MXI8F32-PACKED-DEQUANT: #map2 = affine_map<(d0, d1, d2, d3, d4, d5, d6) -> (d0, d1, d4, d5)>
+// MXI8F32-PACKED-DEQUANT: #map3 = affine_map<(d0, d1) -> (d0)>
+// MXI8F32-PACKED-DEQUANT: #map4 = affine_map<(d0, d1) -> (d1)>
+// MXI8F32-PACKED-DEQUANT: #map5 = affine_map<(d0, d1) -> (d0, d1)>
+// MXI8F32-PACKED-DEQUANT: #map6 = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 // MXI8F32-PACKED-DEQUANT-LABEL:   func.func @entry(
 // MXI8F32-PACKED-DEQUANT-SAME:                     {{.*}}: tensor<128x128x32x64xi8>,
 // MXI8F32-PACKED-DEQUANT-SAME:                     {{.*}}: tensor<4096xf32>, {{.*}}: tensor<128x128x16x32x4xi8>,

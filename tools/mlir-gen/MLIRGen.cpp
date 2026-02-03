@@ -540,14 +540,10 @@ Value MLIRGenerator::lowerMatmul(LayerArgs &args, bool hasMixedType = false) {
     output = getZeroInitTensor(contractOutputTy);
   if (quantType == QuantizationType::Dequant && hasMixedType &&
       inputType.getElementType().isInteger(8)) {
-    Value zeroVal = builder.create<arith::ConstantIntOp>(loc, 0, 32);
-    output =
-        builder
-            .create<tensor::EmptyOp>(
-                loc, RankedTensorType::get(shape, builder.getIntegerType(32)),
-                ValueRange{})
-            .getResult();
-    output = builder.create<linalg::FillOp>(loc, zeroVal, output).getResult(0);
+    // Get integer tensor accumulator type for dequantization.
+    TensorType intAccumulatorType =
+        RankedTensorType::get(shape, builder.getIntegerType(32));
+    output = getZeroInitTensor(intAccumulatorType);
   }
 
   if (vnniPacked) {
@@ -831,6 +827,7 @@ Value MLIRGenerator::quantizeGemm(LayerArgs &args, Value chain,
 }
 
 Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
+  assert(chain && "Expected a gemm");
   Value input = args.input.value;
   Value inputScale = args.inputScale.value;
   Value weight = args.weight.value;
@@ -1335,7 +1332,25 @@ int MLIRGenerator::getRand() {
 }
 
 Value MLIRGenerator::getZeroInitTensor(TensorType type) {
-  auto zero = getConstFloat(builder, 0.0, cast<FloatType>(dataTypes[0]));
+  // Initialize tensor with zeros of all appropriate types such as f32, i32,
+  // bf16, i8
+  Value zero = nullptr;
+  if (type.getElementType().isFloat()) {
+    zero = getConstFloat(builder, 0.0, cast<FloatType>(type.getElementType()));
+  } else if (type.getElementType().isBF16()) {
+    zero = getConstFloat(builder, 0.0, builder.getBF16Type());
+  } else if (type.getElementType().isF16()) {
+    zero = getConstFloat(builder, 0.0, builder.getF16Type());
+  } else if (type.getElementType().isInteger(64)) {
+    zero = getConstInt(builder, 0, 54);
+  } else if (type.getElementType().isInteger(32)) {
+    zero = getConstInt(builder, 0, 32);
+  } else if (type.getElementType().isInteger(8)) {
+    zero = getConstInt(builder, 0, 8);
+  } else {
+    llvm_unreachable("Unsupported element type for zero initialization");
+  }
+
   Value tensor =
       builder.create<tensor::EmptyOp>(loc, type, ValueRange{}).getResult();
   tensor = builder.create<linalg::FillOp>(loc, zero, tensor).getResult(0);
