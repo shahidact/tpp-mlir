@@ -541,13 +541,15 @@ Value MLIRGenerator::lowerMatmul(LayerArgs &args, bool hasMixedType = false) {
   auto inputType = cast<ShapedType>(input.getType());
   auto outputType = cast<ShapedType>(output.getType());
   auto shape = outputType.getShape();
-  auto contractOutputTy =
-      RankedTensorType::get(shape, inputType.getElementType());
+  auto zeroType = RankedTensorType::get(shape, inputType.getElementType());
 
   // For quant, derive the output type from input type.
+  // TODO: Revisit to check we really need zero initalizer for mixed precision
+  // float type?
   if (quantType == QuantizationType::Quant) {
-    output = getZeroInitTensor(contractOutputTy);
-  } else if (quantType == QuantizationType::Dequant) {
+    output = getZeroInitTensor(zeroType);
+  } else if (quantType == QuantizationType::Dequant ||
+             quantType == QuantizationType::Mixed) {
     Type elementType = inputType.getElementType();
     if (elementType.isInteger(8)) {
       // Get integer tensor accumulator type for dequantization.
@@ -850,9 +852,8 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
   Value weightScale = args.weightScale.value;
   Value output = args.output.value;
 
-  // For mixed type, we need to handle input and weight scales. Perform a
-  // outerproduct of input and weight scales and then multiply the result with
-  // the contract output.
+  // For mixed type, we need to handle input and weight scales to compute the
+  // resultant scaleand then multiply the result with the contract output.
   auto inputScaleTy = cast<ShapedType>(inputScale.getType());
   assert(inputScaleTy.getRank() == 1 && "Input scale must be a vector");
   assert(inputScaleTy.getElementType() == dataTypes[2] &&
@@ -909,7 +910,7 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
         utils::IteratorType::parallel, utils::IteratorType::parallel};
   }
 
-  chain =
+  auto result =
       builder
           .create<linalg::GenericOp>(
               loc, TypeRange{outputShapedTy},
@@ -944,7 +945,7 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
 
   // TODO: A place holder for flops computation for dequantization.
   computeMatmulFlops(inputShapedTy, outputShapedTy);
-  return chain;
+  return result;
 }
 
 Value MLIRGenerator::lowerBiasAdd(Value input, Value bias, Value output) {
@@ -1347,14 +1348,11 @@ Value MLIRGenerator::getZeroInitTensor(TensorType type) {
   // Initialize tensor with zeros of all appropriate types such as f32, i32,
   // bf16, i8
   Value zero = nullptr;
-  if (type.getElementType().isFloat()) {
-    zero = getConstFloat(builder, 0.0, cast<FloatType>(type.getElementType()));
-  } else if (type.getElementType().isInteger(64)) {
-    zero = getConstInt(builder, 0, 64);
-  } else if (type.getElementType().isInteger(32)) {
-    zero = getConstInt(builder, 0, 32);
-  } else if (type.getElementType().isInteger(8)) {
-    zero = getConstInt(builder, 0, 8);
+  auto elTy = type.getElementType();
+  if (elTy.isFloat()) {
+    zero = getConstFloat(builder, 0.0, cast<FloatType>(elTy));
+  } else if (elTy.isInteger()) {
+    zero = getConstInt(builder, 0, elTy.getIntOrFloatBitWidth());
   } else {
     llvm_unreachable("Unsupported element type for zero initialization");
   }

@@ -94,8 +94,11 @@
 // MXBF16-CONTRACT-SAME:                     %[[ARG0:.*]]: tensor<2x36x64x64xbf16>,
 // MXBF16-CONTRACT-SAME:                     %[[ARG1:.*]]: tensor<16x36x64x48xbf16>,
 // MXBF16-CONTRACT-SAME:                     %[[ARG2:.*]]: tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32> {
-// MXBF16-CONTRACT:           %[[VAL_0:.*]] = linalg.contract indexing_maps = [#[[$ATTR_0]], #[[$ATTR_1]], #[[$ATTR_2]]] ins(%[[ARG0]], %[[ARG1]] : tensor<2x36x64x64xbf16>, tensor<16x36x64x48xbf16>) outs(%[[ARG2]] : tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32>
-// MXBF16-CONTRACT:           return %[[VAL_0]] : tensor<2x16x64x48xf32>
+// MXBF16-CONTRACT:           %[[VAL_0:.*]] = arith.constant 0.000000e+00 : f32
+// MXBF16-CONTRACT:           %[[VAL_1:.*]] = tensor.empty() : tensor<2x16x64x48xf32>
+// MXBF16-CONTRACT:           %[[VAL_2:.*]] = linalg.fill ins(%[[VAL_0]] : f32) outs(%[[VAL_1]] : tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32>
+// MXBF16-CONTRACT:           %[[VAL_3:.*]] = linalg.contract indexing_maps = [#[[$ATTR_0]], #[[$ATTR_1]], #[[$ATTR_2]]] ins(%[[ARG0]], %[[ARG1]] : tensor<2x36x64x64xbf16>, tensor<16x36x64x48xbf16>) outs(%[[VAL_2]] : tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32>
+// MXBF16-CONTRACT:           return %[[VAL_3]] : tensor<2x16x64x48xf32>
 // MXBF16-CONTRACT:         }
 
 // MXI8-CONTRACT: #[[$ATTR_0:.+]] = affine_map<(d0, d1, d2, d3, d4, d5) -> (d0, d2, d3, d5)>
@@ -105,8 +108,11 @@
 // MXI8-CONTRACT-SAME:                     %[[ARG0:.*]]: tensor<2x36x64x64xi8>,
 // MXI8-CONTRACT-SAME:                     %[[ARG1:.*]]: tensor<16x36x64x48xi8>,
 // MXI8-CONTRACT-SAME:                     %[[ARG2:.*]]: tensor<2x16x64x48xi32>) -> tensor<2x16x64x48xi32> {
-// MXI8-CONTRACT:           %[[VAL_0:.*]] = linalg.contract indexing_maps = [#[[$ATTR_0]], #[[$ATTR_1]], #[[$ATTR_2]]] ins(%[[ARG0]], %[[ARG1]] : tensor<2x36x64x64xi8>, tensor<16x36x64x48xi8>) outs(%[[ARG2]] : tensor<2x16x64x48xi32>) -> tensor<2x16x64x48xi32>
-// MXI8-CONTRACT:           return %[[VAL_0]] : tensor<2x16x64x48xi32>
+// MXI8-CONTRACT:           %[[VAL_0:.*]] = arith.constant 0 : i32
+// MXI8-CONTRACT:           %[[VAL_1:.*]] = tensor.empty() : tensor<2x16x64x48xi32>
+// MXI8-CONTRACT:           %[[VAL_2:.*]] = linalg.fill ins(%[[VAL_0]] : i32) outs(%[[VAL_1]] : tensor<2x16x64x48xi32>) -> tensor<2x16x64x48xi32>
+// MXI8-CONTRACT:           %[[VAL_3:.*]] = linalg.contract indexing_maps = [#[[$ATTR_0]], #[[$ATTR_1]], #[[$ATTR_2]]] ins(%[[ARG0]], %[[ARG1]] : tensor<2x36x64x64xi8>, tensor<16x36x64x48xi8>) outs(%[[VAL_2]] : tensor<2x16x64x48xi32>) -> tensor<2x16x64x48xi32>
+// MXI8-CONTRACT:           return %[[VAL_3]] : tensor<2x16x64x48xi32>
 // MXI8-CONTRACT:         }
 
 // MXF16-GENERIC: #[[$ATTR_0:.+]] = affine_map<(d0, d1, d2, d3, d4, d5) -> (d0, d2, d3, d5)>
@@ -134,19 +140,22 @@
 // MXF16-CONTRACT-SAME:                     %[[ARG0:.*]]: tensor<2x36x64x64xf16>,
 // MXF16-CONTRACT-SAME:                     %[[ARG1:.*]]: tensor<16x36x64x48xf16>,
 // MXF16-CONTRACT-SAME:                     %[[ARG2:.*]]: tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32> {
-// MXF16-CONTRACT:           %[[VAL_0:.*]] = linalg.contract indexing_maps = [#[[$ATTR_0]], #[[$ATTR_1]], #[[$ATTR_2]]] ins(%[[ARG0]], %[[ARG1]] : tensor<2x36x64x64xf16>, tensor<16x36x64x48xf16>) outs(%[[ARG2]] : tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32>
-// MXF16-CONTRACT:           return %[[VAL_0]] : tensor<2x16x64x48xf32>
+// MXF16-CONTRACT:           %[[VAL_0:.*]] = arith.constant 0.000000e+00 : f32
+// MXF16-CONTRACT:           %[[VAL_1:.*]] = tensor.empty() : tensor<2x16x64x48xf32>
+// MXF16-CONTRACT:           %[[VAL_2:.*]] = linalg.fill ins(%[[VAL_0]] : f32) outs(%[[VAL_1]] : tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32>
+// MXF16-CONTRACT:           %[[VAL_3:.*]] = linalg.contract indexing_maps = [#[[$ATTR_0]], #[[$ATTR_1]], #[[$ATTR_2]]] ins(%[[ARG0]], %[[ARG1]] : tensor<2x36x64x64xf16>, tensor<16x36x64x48xf16>) outs(%[[VAL_2]] : tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32>
+// MXF16-CONTRACT:           return %[[VAL_3]] : tensor<2x16x64x48xf32>
 // MXF16-CONTRACT:         }
 
 
 // Perform Gemm dequntization using given scales.
 
-// MXBF16-DEQUANT: #map = affine_map<(d0, d1, d2) -> (d0, d2)>
-// MXBF16-DEQUANT: #map1 = affine_map<(d0, d1, d2) -> (d2, d1)>
-// MXBF16-DEQUANT: #map2 = affine_map<(d0, d1, d2) -> (d0, d1)>
-// MXBF16-DEQUANT: #map3 = affine_map<(d0, d1) -> (d0, d1)>
-// MXBF16-DEQUANT: #map4 = affine_map<(d0, d1) -> (d0)>
-// MXBF16-DEQUANT: #map5 = affine_map<(d0, d1) -> (d1)>
+// MXBF16-DEQUANT-DAG: #map = affine_map<(d0, d1, d2) -> (d0, d2)>
+// MXBF16-DEQUANT-DAG: #map1 = affine_map<(d0, d1, d2) -> (d2, d1)>
+// MXBF16-DEQUANT-DAG: #map2 = affine_map<(d0, d1, d2) -> (d0, d1)>
+// MXBF16-DEQUANT-DAG: #map3 = affine_map<(d0, d1) -> (d0, d1)>
+// MXBF16-DEQUANT-DAG: #map4 = affine_map<(d0, d1) -> (d0)>
+// MXBF16-DEQUANT-DAG: #map5 = affine_map<(d0, d1) -> (d1)>
 // MXBF16-DEQUANT-LABEL:   func.func @entry(
 // MXBF16-DEQUANT-SAME:                     %arg0: tensor<128x2304xbf16>,
 // MXBF16-DEQUANT-SAME:                     %arg1: tensor<128xf32>,
@@ -175,6 +184,7 @@
 // MXI8F32-DEQUANT:           linalg.generic  {indexing_maps = [#map3, #map4, #map5, #map3], iterator_types = ["parallel", "parallel"]}
 // MXI8F32-DEQUANT:           ^bb0
 // MXI8F32-DEQUANT:             arith.mulf
+// MXI8F32-DEQUANT:             arith.sitofp
 // MXI8F32-DEQUANT:             arith.mulf
 // MXI8F32-DEQUANT:             linalg.yield
 
