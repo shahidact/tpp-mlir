@@ -82,10 +82,10 @@ llvm::cl::opt<std::string>
               llvm::cl::value_desc("f32|i32"), llvm::cl::init(""));
 
 // Quantization type to specify the quantization kernel to be generated.
-llvm::cl::opt<std::string>
-    quantizationType("quant-type", llvm::cl::desc("Specify quantization type"),
-                     llvm::cl::value_desc("quantize|dequantize"),
-                     llvm::cl::init(""));
+llvm::cl::opt<std::string> quantizationType(
+    "quant-type", llvm::cl::desc("Specify quantization type"),
+    llvm::cl::value_desc("mixed|quantize|dequantize|testquant"),
+    llvm::cl::init(""));
 
 // Random seed
 llvm::cl::opt<int> seed("seed", llvm::cl::desc("Random seed"),

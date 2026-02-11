@@ -65,6 +65,27 @@ static SmallVector<bool> getBroadcastDims(ArrayRef<int64_t> sourceShape,
   return broadcastDims;
 }
 
+// Helper function to create the expand_tensor operation.
+static Value createExpandedScaleTensor(OpBuilder &builder, Location loc,
+                                       Value scale, SmallVector<int64_t> tiles,
+                                       bool isInputScale = false) {
+  auto outputScaleTy = cast<ShapedType>(scale.getType());
+  assert(outputScaleTy.getRank() == 1 && "Scale must be 1-D");
+  auto shape = outputScaleTy.getShape();
+  SmallVector<int64_t, 4> scaleShapes = {1, 1, 1, 1};
+  auto tiledDim = isInputScale ? 0 : 1;
+  auto tileFactor = tiles[tiledDim];
+  scaleShapes[0] = shape[0] / tileFactor;
+  scaleShapes[2] = tileFactor;
+  auto packedScaleTy =
+      RankedTensorType::get(scaleShapes, outputScaleTy.getElementType());
+  SmallVector<ReassociationIndices> reassociationIndices;
+  reassociationIndices.push_back({0, 1, 2, 3});
+  scale = builder.create<tensor::ExpandShapeOp>(loc, packedScaleTy, scale,
+                                                reassociationIndices);
+  return scale;
+}
+
 } // anonymous namespace
 
 MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
@@ -155,11 +176,19 @@ MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
   // Parse quantization type
   auto optQuantType =
       llvm::StringSwitch<std::optional<QuantizationType>>(quantizationTypeStr)
+          .CaseLower("mixed", QuantizationType::Mixed)
           .CaseLower("quantize", QuantizationType::Quant)
           .CaseLower("dequantize", QuantizationType::Dequant)
           .CaseLower("testquant", QuantizationType::QuantDequant)
           .Default(QuantizationType::None);
   quantType = *optQuantType;
+
+  // If the target type contains "mx", it is a mixed precision type. If
+  // quantization type is not explicitly specified, we will default to Mixed
+  // quantization type for mixed precision target types.
+  bool hasMixedType = !targetType.empty() && targetType.contains("mx");
+  if (hasMixedType && quantType == QuantizationType::None)
+    quantType = QuantizationType::Mixed;
 
   // const kernelType is only supported for non quantization kernel.
   assert(!(kernelType == KernelType::Const &&
@@ -512,12 +541,27 @@ Value MLIRGenerator::lowerMatmul(LayerArgs &args, bool hasMixedType = false) {
   auto inputType = cast<ShapedType>(input.getType());
   auto outputType = cast<ShapedType>(output.getType());
   auto shape = outputType.getShape();
-  auto contractOutputTy =
-      RankedTensorType::get(shape, inputType.getElementType());
+  auto zeroType = RankedTensorType::get(shape, inputType.getElementType());
 
   // For quant, derive the output type from input type.
-  if (quantType == QuantizationType::Quant)
-    output = getZeroInitTensor(contractOutputTy);
+  // TODO: Revisit to check we really need zero initalizer for mixed precision
+  // float type?
+  if (quantType == QuantizationType::Quant) {
+    output = getZeroInitTensor(zeroType);
+  } else if (quantType == QuantizationType::Dequant ||
+             quantType == QuantizationType::Mixed) {
+    Type elementType = inputType.getElementType();
+    if (elementType.isInteger(8)) {
+      // Get integer tensor accumulator type for dequantization.
+      TensorType intAccumulatorType =
+          RankedTensorType::get(shape, builder.getIntegerType(32));
+      output = getZeroInitTensor(intAccumulatorType);
+    } else if (elementType.isBF16() || elementType.isF16()) {
+      output = getZeroInitTensor(cast<TensorType>(outputType));
+    } else {
+      llvm_unreachable("Unsupported dequantization data type");
+    }
+  }
 
   if (vnniPacked) {
     SmallVector<int64_t> vnniShape{inputType.getShape()};
@@ -800,20 +844,16 @@ Value MLIRGenerator::quantizeGemm(LayerArgs &args, Value chain,
 }
 
 Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
+  // Chain is the contract/gemm output
+  assert(chain && "Expected valid chain output from contract/gemm operation");
+
   Value input = args.input.value;
   Value inputScale = args.inputScale.value;
-  Value weight = args.weight.value;
   Value weightScale = args.weightScale.value;
   Value output = args.output.value;
-  MLIRContext *ctx = &context;
-  SmallVector<Attribute> maps;
-  maps.push_back(AffineMapAttr::get(getMap(input, MAP_MATMUL_INPUT)));
-  maps.push_back(AffineMapAttr::get(getMap(weight, MAP_MATMUL_WEIGHT)));
-  maps.push_back(AffineMapAttr::get(getMap(output, MAP_MATMUL_OUTPUT)));
 
-  // For mixed type, we need to handle input and weight scales. Perform a dot
-  // product of input and weight scales and then multiply the result with the
-  // contract output.
+  // For mixed type, we need to handle input and weight scales to compute the
+  // resultant scaleand then multiply the result with the contract output.
   auto inputScaleTy = cast<ShapedType>(inputScale.getType());
   assert(inputScaleTy.getRank() == 1 && "Input scale must be a vector");
   assert(inputScaleTy.getElementType() == dataTypes[2] &&
@@ -827,77 +867,85 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
   // Create a 2-D ouput scale shape using input and weight scales
   auto outputScaleShape = SmallVector<int64_t>{inputScaleTy.getShape()[0],
                                                weightScaleTy.getShape()[0]};
-  auto outputScaleTy = RankedTensorType::get(outputScaleShape, dataTypes[2]);
   auto inputShapedTy = cast<ShapedType>(input.getType());
   auto outputShapedTy = cast<ShapedType>(output.getType());
 
-  // Create a dot product of input and weight scales
+  // Create map for outerproduct of input and weight scales
+  MLIRContext *ctx = &context;
   auto dim0 = getAffineDimExpr(0, ctx);
   auto dim1 = getAffineDimExpr(1, ctx);
-  auto lhsMap = AffineMap::get(2, 0, {dim0}, ctx);
-  auto rhsMap = AffineMap::get(2, 0, {dim1}, ctx);
-  auto outputMap = AffineMap::get(2, 0, {dim0, dim1}, ctx);
+  auto inputScaleMap = AffineMap::get(2, 0, {dim0}, ctx);
+  auto weightScaleMap = AffineMap::get(2, 0, {dim1}, ctx);
   SmallVector<utils::IteratorType> iteratorTypes = {
       utils::IteratorType::parallel, utils::IteratorType::parallel};
+  // Initialize the map for linalg.generic to perform dequantization of result
+  // of gemm with scales.
+  SmallVector<AffineMap> reshapeMap = {getMap(chain, MAP_PARALLEL),
+                                       inputScaleMap, weightScaleMap,
+                                       getMap(output, MAP_PARALLEL)};
+  // If tiling is applied, we need to expand the scale tensors to match the
+  // tiled dimensions and update the reshape map and iterator types accordingly.
+  if (tiles.size() > 0) {
+    // The expansion is essentially a reshape with some dimensions being marked
+    // as unit size dim for broadcasting.
+    inputScale =
+        createExpandedScaleTensor(builder, loc, inputScale, tiles, true);
+    weightScale =
+        createExpandedScaleTensor(builder, loc, weightScale, tiles, false);
+    // Update the reshape map to broadcast the unit dims for the expanded scale
+    // tensors.
+    SmallVector<AffineExpr> scaleAffineExprs;
+    auto dim = 0;
+    for (auto i : cast<ShapedType>(inputScale.getType()).getShape()) {
+      scaleAffineExprs.push_back(i == 1 ? getAffineConstantExpr(0, &context)
+                                        : getAffineDimExpr(dim, &context));
+      dim++;
+    }
+    AffineMap packedScaleMap =
+        AffineMap::get(outputShapedTy.getRank(), 0, scaleAffineExprs, &context);
+    reshapeMap[1] = packedScaleMap;
+    reshapeMap[2] = packedScaleMap;
+    iteratorTypes = {
+        utils::IteratorType::parallel, utils::IteratorType::parallel,
+        utils::IteratorType::parallel, utils::IteratorType::parallel};
+  }
 
-  Value emptyTensor =
-      builder.create<tensor::EmptyOp>(loc, outputScaleTy, ValueRange{});
-
-  // Compute output scale factor from A and B scales
-  auto dotProduct =
+  auto result =
       builder
           .create<linalg::GenericOp>(
-              loc, outputScaleTy, ValueRange{inputScale, weightScale},
-              ValueRange{emptyTensor},
-              ArrayRef<AffineMap>{lhsMap, rhsMap, outputMap}, iteratorTypes,
+              loc, TypeRange{outputShapedTy},
+              ValueRange{chain, inputScale, weightScale}, ValueRange{output},
+              reshapeMap, iteratorTypes,
               [&](OpBuilder &nestedBuilder, Location nestedLoc,
                   ValueRange blockArgs) {
                 auto arg0 = blockArgs[0];
                 auto arg1 = blockArgs[1];
+                auto arg2 = blockArgs[2];
                 auto alu =
                     inputScaleTy.getElementType().isInteger()
-                        ? nestedBuilder.create<arith::MulIOp>(loc, arg0, arg1)
+                        ? nestedBuilder.create<arith::MulIOp>(loc, arg1, arg2)
                               .getResult()
-                        : nestedBuilder.create<arith::MulFOp>(loc, arg0, arg1)
+                        : nestedBuilder.create<arith::MulFOp>(loc, arg1, arg2)
                               .getResult();
+                Value castToFloat = arg0;
+                if (arg0.getType() != dataTypes[2]) {
+                  if (arg0.getType().isF16() || arg0.getType().isBF16()) {
+                    castToFloat = nestedBuilder.create<arith::ExtFOp>(
+                        loc, dataTypes[2], arg0);
+                  } else {
+                    castToFloat = nestedBuilder.create<arith::SIToFPOp>(
+                        loc, dataTypes[2], arg0);
+                  }
+                }
+                alu = nestedBuilder.create<arith::MulFOp>(loc, castToFloat, alu)
+                          .getResult();
                 nestedBuilder.create<linalg::YieldOp>(loc, ValueRange{alu});
               })
           .getResult(0);
 
-  // If contract output is integer and scale type is float, Perform
-  // elementwise cast of contract from integer to float.
-  auto castedOutput =
-      builder.create<tensor::EmptyOp>(loc, outputScaleTy, ValueRange{});
-  if (outputShapedTy.getElementType().isInteger() && dataTypes[2].isFloat()) {
-    // Elementwise sitofp cast using linalg.generic
-    chain =
-        builder
-            .create<linalg::GenericOp>(
-                loc, outputScaleTy, ValueRange{chain}, ValueRange{castedOutput},
-                ArrayRef<AffineMap>{getMap(chain, MAP_PARALLEL),
-                                    getMap(castedOutput, MAP_PARALLEL)},
-                getIterators(MAP_PARALLEL),
-                [&](OpBuilder &nestedBuilder, Location nestedLoc,
-                    ValueRange blockArgs) {
-                  auto arg0 = blockArgs[0];
-                  auto casted = nestedBuilder.create<arith::SIToFPOp>(
-                      loc, dataTypes[2], arg0);
-                  nestedBuilder.create<linalg::YieldOp>(loc,
-                                                        ValueRange{casted});
-                })
-            .getResult(0);
-  }
-
-  // Multiply the contract output with the output scale factor
-  chain = builder
-              .create<linalg::MulOp>(loc, TypeRange{castedOutput.getType()},
-                                     ValueRange{chain, dotProduct},
-                                     ValueRange{castedOutput})
-              .getResult(0);
-
   // TODO: A place holder for flops computation for dequantization.
   computeMatmulFlops(inputShapedTy, outputShapedTy);
-  return chain;
+  return result;
 }
 
 Value MLIRGenerator::lowerBiasAdd(Value input, Value bias, Value output) {
@@ -1297,7 +1345,18 @@ int MLIRGenerator::getRand() {
 }
 
 Value MLIRGenerator::getZeroInitTensor(TensorType type) {
-  auto zero = getConstFloat(builder, 0.0, cast<FloatType>(dataTypes[0]));
+  // Initialize tensor with zeros of all appropriate types such as f32, i32,
+  // bf16, i8
+  Value zero = nullptr;
+  auto elTy = type.getElementType();
+  if (elTy.isFloat()) {
+    zero = getConstFloat(builder, 0.0, cast<FloatType>(elTy));
+  } else if (elTy.isInteger()) {
+    zero = getConstInt(builder, 0, elTy.getIntOrFloatBitWidth());
+  } else {
+    llvm_unreachable("Unsupported element type for zero initialization");
+  }
+
   Value tensor =
       builder.create<tensor::EmptyOp>(loc, type, ValueRange{}).getResult();
   tensor = builder.create<linalg::FillOp>(loc, zero, tensor).getResult(0);

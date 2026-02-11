@@ -95,7 +95,7 @@ class MLIRGenerator {
   KernelType kernelType;
 
   /// List of supported quantization ops types that can be generated
-  enum class QuantizationType { None, Quant, Dequant, QuantDequant };
+  enum class QuantizationType { None, Mixed, Quant, Dequant, QuantDequant };
 
   /// Type of quantization ops to be generated
   QuantizationType quantType;

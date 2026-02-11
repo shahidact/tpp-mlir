@@ -56,6 +56,8 @@ func::FuncOp createFunction(OpBuilder &builder, ModuleOp module, StringRef name,
 
 Value getConstInt(OpBuilder &builder, int value, int width) {
   switch (width) {
+  case 8:
+    return getConstant(builder, builder.getI8Type(), value);
   case 32:
     return getConstant(builder, builder.getI32Type(), value);
   case 64:
