@@ -79,7 +79,7 @@ llvm::cl::opt<std::string>
 // place holder.
 llvm::cl::opt<std::string>
     scaleType("scale-type", llvm::cl::desc("Data type of scaling factor"),
-              llvm::cl::value_desc("f32|i32"), llvm::cl::init(""));
+              llvm::cl::value_desc("f32|i8"), llvm::cl::init(""));
 
 // Quantization type to specify the quantization kernel to be generated.
 llvm::cl::opt<std::string> quantizationType(
