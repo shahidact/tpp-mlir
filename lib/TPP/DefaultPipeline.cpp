@@ -55,6 +55,12 @@ llvm::cl::opt<bool>
                 llvm::cl::desc("Default pipeline - enable parallel execution"),
                 llvm::cl::init(false));
 
+// Control scf.forall iteration ordering / flattening strategy.
+llvm::cl::opt<bool>
+    sfcOrder("sfc-order",
+                llvm::cl::desc("Use space-filling-curve-based iteration ordering / flattening for scf.forall loops in the default pipeline"),
+                llvm::cl::init(true));
+
 // Control grid parallelism sizes.
 llvm::cl::list<unsigned>
     parallelTaskGrid("parallel-task-grid",
@@ -162,6 +168,7 @@ private:
       // Apply the default preprocessing pass
       DefaultTppPassesOptions tppDefaultOptions; 
       tppDefaultOptions.linalgToLoops = linalgToLoops;
+      tppDefaultOptions.sfcOrder = sfcOrder;
       tppDefaultOptions.parallelTaskGrid = SmallVector<unsigned>{
           parallelTaskGrid.begin(), parallelTaskGrid.end()};
       tppDefaultOptions.linalgToVector = linalgToVector;
