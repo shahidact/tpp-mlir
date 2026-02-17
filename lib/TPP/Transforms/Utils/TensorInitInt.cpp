@@ -226,15 +226,38 @@ void QuantTensorInitInt::fillData() {
   // Update the internal buffer with quantized values.
   buffer = quantizedValues;
 
-  // Update the corresponding rescale into temporary storage scaleBuffer.
-  if (floatInit) {
-    std::vector<llvm::APFloat> rescales;
+  // Update the corresponding float/int8 dequant scale factors into member
+  // variable of class object.
+  if (floatScaleInit) {
+    std::vector<llvm::APFloat> floatDequantScales;
     for (size_t i = 0; i < channelwiseScales.size(); i++) {
-      rescales.emplace_back(static_cast<float>(1.0f / channelwiseScales[i]));
+      floatDequantScales.emplace_back(
+          static_cast<float>(1.0f / channelwiseScales[i]));
     }
-    floatInit->setScaleBuffer(rescales);
+    static_cast<QuantScaleTensorInitFloat *>(floatScaleInit.get())
+        ->setScaleBuffer(floatDequantScales);
+  }
+
+  if (intScaleInit) {
+    std::vector<llvm::APInt> dequantizeIntScales;
+    for (size_t i = 0; i < channelwiseScales.size(); i++) {
+      float scale = 1.0f / static_cast<float>(channelwiseScales[i]);
+      uint32_t shiftedValue = *reinterpret_cast<uint32_t *>(&scale) >> 23;
+      llvm::APInt intScale(bitWidth, shiftedValue, false);
+      dequantizeIntScales.emplace_back(intScale);
+    }
+    static_cast<QuantScaleTensorInitInt *>(intScaleInit.get())
+        ->setScaleBuffer(dequantizeIntScales);
   }
 
   // Update the matrix type to indicate next argument would be weight matrix.
   isInputMatrix = false;
+}
+
+// Update scale buffer of base class with computed dequant scale factors.
+void QuantScaleTensorInitInt::fillData() {
+  assert(intScaleBuffer.size() > 0 && "scaleBuffer is empty");
+  for (size_t i = 0; i < intScaleBuffer.size(); i++) {
+    push(intScaleBuffer[i]);
+  }
 }

@@ -150,12 +150,13 @@ struct IdentityTensorInitInt : TensorInitInt {
 };
 
 struct QuantScaleTensorInitFloat;
+struct QuantScaleTensorInitInt;
 // Random init (normal).
 struct QuantTensorInitInt : TensorInitInt {
-  QuantTensorInitInt(DataType type, int seed,
-                     std::shared_ptr<QuantScaleTensorInitFloat> floatInit)
+  QuantTensorInitInt(DataType type, int seed, TensorInitPtr floatScaleInit,
+                     TensorInitPtr intScaleInit)
       : TensorInitInt(type), generator(seed), distribution(0.0, 0.2),
-        floatInit(floatInit) {}
+        floatScaleInit(floatScaleInit), intScaleInit(intScaleInit) {}
 
   // Indicate which matrix it being initialized, input or weight
   bool isInputMatrix = true;
@@ -179,8 +180,33 @@ private:
   std::default_random_engine generator;
   // Random distribution.
   std::normal_distribution<float> distribution;
-  // Shared pointer to the associated QuantScaleTensorInitFloat instance
-  std::shared_ptr<QuantScaleTensorInitFloat> floatInit;
+  // Shared pointer to the associated QuantScaleTensorInitFloat /
+  // QuantScaleTensorInitInt instances.
+  TensorInitPtr floatScaleInit;
+  TensorInitPtr intScaleInit;
+};
+
+struct QuantScaleTensorInitInt : TensorInitInt {
+  QuantScaleTensorInitInt(DataType type, int seed)
+      : TensorInitInt(type), generator(seed), distribution(0.0, 0.2) {}
+
+  // Method to set scale buffer.
+  void setScaleBuffer(const std::vector<llvm::APInt> &newBuffer) {
+    intScaleBuffer = newBuffer;
+  }
+
+  // Should not be called.
+  float next() { assert(false && "Should not be called"); }
+  // Update internal buffer with dequant scale factors.
+  void fillData() override;
+
+private:
+  // Scale buffer corresponding to quantized arguments.
+  std::vector<llvm::APInt> intScaleBuffer;
+  // Random generator.
+  std::default_random_engine generator;
+  // Random distribution.
+  std::normal_distribution<float> distribution;
 };
 
 #endif // TPP_TRANSFORMS_UTILS_TENSORINITINT_H
