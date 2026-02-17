@@ -968,20 +968,20 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
                 }
                 alu = nestedBuilder.create<arith::MulFOp>(loc, castToFloat, alu)
                           .getResult();
-            Value castToFloat = arg0;
-            if (arg0.getType() != dataTypes[2]) {
-              if (arg0.getType().isF16() || arg0.getType().isBF16()) {
-                castToFloat = arith::ExtFOp::create(nestedBuilder, loc,
-                                                    dataTypes[2], arg0);
-              } else {
-                castToFloat = arith::SIToFPOp::create(nestedBuilder, loc,
-                                                      dataTypes[2], arg0);
-              }
-            }
-            alu = arith::MulFOp::create(nestedBuilder, loc, castToFloat, alu)
-                      .getResult();
-            linalg::YieldOp::create(nestedBuilder, loc, ValueRange{alu});
-          })
+                if (arg0.getType() != dataTypes[2]) {
+                  if (arg0.getType().isF16() || arg0.getType().isBF16()) {
+                    castToFloat = arith::ExtFOp::create(nestedBuilder, loc,
+                                                        dataTypes[2], arg0);
+                  } else {
+                    castToFloat = arith::SIToFPOp::create(nestedBuilder, loc,
+                                                          dataTypes[2], arg0);
+                  }
+                }
+                alu =
+                    arith::MulFOp::create(nestedBuilder, loc, castToFloat, alu)
+                        .getResult();
+                linalg::YieldOp::create(nestedBuilder, loc, ValueRange{alu});
+              })
           .getResult(0);
 
   // TODO: A place holder for flops computation for dequantization.
