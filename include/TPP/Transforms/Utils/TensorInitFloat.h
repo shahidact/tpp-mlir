@@ -18,7 +18,6 @@
 #include "TPP/Transforms/Utils/TensorInit.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Types.h"
-#include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
 #include <random>
@@ -26,10 +25,11 @@
 // Base class for float values.
 struct TensorInitFloat : public TensorInit<llvm::APFloat> {
   // Supported data types. (TODO: Support 8-bit data types)
-  enum class DataType { AUTO, FP16, FP32, FP64, BF16 };
+  enum class DataType { AUTO, FP16, FP32, FP64, BF16, F8E8M0FNU };
 
   static bool isTypeSupported(const mlir::Type &type) {
-    return type.isF16() || type.isF32() || type.isF64() || type.isBF16();
+    return type.isF16() || type.isF32() || type.isF64() || type.isBF16() ||
+           type.isFloat(8);
   }
 
   // Get data type from element type.
@@ -39,6 +39,13 @@ struct TensorInitFloat : public TensorInit<llvm::APFloat> {
   virtual ~TensorInitFloat() = default;
 
 protected:
+  // F8E8M0FNU conversion (by reference).
+  static void toF8E8M0FNU(llvm::APFloat &value) {
+    bool ignored;
+    value.convert(llvm::APFloat::Float8E8M0FNU(),
+                  llvm::APFloat::rmNearestTiesToEven, &ignored);
+  }
+
   // FP16 conversion (by reference).
   static void toFP16(llvm::APFloat &value) {
     bool ignored;
@@ -175,6 +182,29 @@ struct QuantScaleTensorInitFloat : TensorInitFloat {
 private:
   // Scale buffer corresponding to quantized arguments.
   std::vector<llvm::APFloat> scaleBuffer;
+  // Random generator.
+  std::default_random_engine generator;
+  // Random distribution.
+  std::normal_distribution<float> distribution;
+};
+
+struct QuantScaleTensorInitF8e8m0 : TensorInitFloat {
+  QuantScaleTensorInitF8e8m0(DataType type, int seed)
+      : TensorInitFloat(type), generator(seed), distribution(0.0, 0.2) {}
+
+  // Method to set scale buffer.
+  void setScaleBuffer(const std::vector<llvm::APFloat> &newBuffer) {
+    scaleBufferf8 = newBuffer;
+  }
+
+  // Should not be called.
+  float next() { assert(false && "Should not be called"); }
+  // Update internal buffer with dequant scale factors.
+  void fillData() override;
+
+private:
+  // Scale buffer corresponding to quantized arguments.
+  std::vector<llvm::APFloat> scaleBufferf8;
   // Random generator.
   std::default_random_engine generator;
   // Random distribution.

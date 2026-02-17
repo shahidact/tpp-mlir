@@ -152,10 +152,10 @@ struct IdentityTensorInitInt : TensorInitInt {
 struct QuantScaleTensorInitFloat;
 // Random init (normal).
 struct QuantTensorInitInt : TensorInitInt {
-  QuantTensorInitInt(DataType type, int seed,
-                     std::shared_ptr<QuantScaleTensorInitFloat> floatInit)
+  QuantTensorInitInt(DataType type, int seed, TensorInitPtr floatScaleInit,
+                     TensorInitPtr f8e8m0ScaleInit)
       : TensorInitInt(type), generator(seed), distribution(0.0, 0.2),
-        floatInit(floatInit) {}
+        floatScaleInit(floatScaleInit), f8e8m0ScaleInit(f8e8m0ScaleInit) {}
 
   // Indicate which matrix it being initialized, input or weight
   bool isInputMatrix = true;
@@ -179,8 +179,8 @@ private:
   std::default_random_engine generator;
   // Random distribution.
   std::normal_distribution<float> distribution;
-  // Shared pointer to the associated QuantScaleTensorInitFloat instance
-  std::shared_ptr<QuantScaleTensorInitFloat> floatInit;
+  TensorInitPtr floatScaleInit;
+  TensorInitPtr f8e8m0ScaleInit;
 };
 
 #endif // TPP_TRANSFORMS_UTILS_TENSORINITINT_H

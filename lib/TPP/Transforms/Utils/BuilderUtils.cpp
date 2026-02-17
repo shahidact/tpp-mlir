@@ -86,7 +86,8 @@ Value createDenseTensor(OpBuilder &builder, TensorInitType initType,
 }
 
 Value createDenseMemref(OpBuilder &builder, ModuleOp module,
-                        TensorInitType initType, MemRefType type, int seed) {
+                        TensorInitType initType, MemRefType type, int seed,
+                        bool isScaleArgument) {
   auto unkLoc = builder.getUnknownLoc();
   StringRef globalName;
   // First create the global
@@ -104,7 +105,8 @@ Value createDenseMemref(OpBuilder &builder, ModuleOp module,
     std::string name = "__wrapper_" + std::to_string(order++);
 
     auto alignment = builder.getIntegerAttr(builder.getI64Type(), 128);
-    auto init = getTensorInit(initType, type.getElementType(), seed);
+    auto init =
+        getTensorInit(initType, type.getElementType(), seed, isScaleArgument);
     auto floatInit = init->get(type);
     assert(!failed(floatInit) && "Invalid dense tensor initializer");
 

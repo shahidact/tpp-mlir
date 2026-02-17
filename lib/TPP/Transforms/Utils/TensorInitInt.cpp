@@ -226,13 +226,30 @@ void QuantTensorInitInt::fillData() {
   // Update the internal buffer with quantized values.
   buffer = quantizedValues;
 
-  // Update the corresponding rescale into temporary storage scaleBuffer.
-  if (floatInit) {
-    std::vector<llvm::APFloat> rescales;
+  // Update the corresponding float/f8 dequant scale factors into member
+  // variable of class object.
+  if (floatScaleInit) {
+    std::vector<llvm::APFloat> floatDequantScales;
     for (size_t i = 0; i < channelwiseScales.size(); i++) {
-      rescales.emplace_back(static_cast<float>(1.0f / channelwiseScales[i]));
+      floatDequantScales.emplace_back(
+          static_cast<float>(1.0f / channelwiseScales[i]));
     }
-    floatInit->setScaleBuffer(rescales);
+    static_cast<QuantScaleTensorInitFloat *>(floatScaleInit.get())
+        ->setScaleBuffer(floatDequantScales);
+  }
+
+  if (f8e8m0ScaleInit) {
+    std::vector<llvm::APFloat> f8DequantizeScales;
+    for (size_t i = 0; i < channelwiseScales.size(); i++) {
+      float scale = 1.0f / static_cast<float>(channelwiseScales[i]);
+      // For F8E8M0, the scale is represented as an 8-bit unsigned integer.
+      uint32_t shiftedValue = *reinterpret_cast<uint32_t *>(&scale) >> 23;
+      llvm::APInt intScale(bitWidth, shiftedValue, false);
+      f8DequantizeScales.emplace_back(
+          llvm::APFloat(llvm::APFloat::Float8E8M0FNU(), intScale));
+    }
+    static_cast<QuantScaleTensorInitF8e8m0 *>(f8e8m0ScaleInit.get())
+        ->setScaleBuffer(f8DequantizeScales);
   }
 
   // Update the matrix type to indicate next argument would be weight matrix.

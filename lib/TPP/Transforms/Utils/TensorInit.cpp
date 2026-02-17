@@ -19,13 +19,15 @@ namespace {
 
 struct InitKey {
   InitKey() = default;
-  explicit InitKey(TensorInitType type, mlir::Type elmType, int seed)
-      : type(type) {
+  explicit InitKey(TensorInitType type, mlir::Type elmType, int seed,
+                   bool isScaleArgument = false)
+      : type(type), isScaleArgument(isScaleArgument) {
     // Seed only matters for randomized types.
     switch (type) {
     case TensorInitType::Random:
     case TensorInitType::Normal:
     case TensorInitType::Quant:
+    case TensorInitType::Mixed:
       this->seed = seed;
       break;
     default:
@@ -39,13 +41,15 @@ struct InitKey {
 
   bool operator==(const InitKey &ik) const {
     return type == ik.type && floatType == ik.floatType &&
-           intType == ik.intType && seed == ik.seed;
+           intType == ik.intType && seed == ik.seed &&
+           isScaleArgument == ik.isScaleArgument;
   }
 
   TensorInitType type;
   TensorInitFloat::DataType floatType;
   TensorInitInt::DataType intType;
   int seed;
+  bool isScaleArgument;
 };
 
 struct InitKeyHash_fn {
@@ -54,7 +58,8 @@ struct InitKeyHash_fn {
     std::size_t h2 = std::hash<TensorInitFloat::DataType>{}(ik.floatType);
     std::size_t h3 = std::hash<TensorInitInt::DataType>{}(ik.intType);
     std::size_t h4 = std::hash<int>{}(ik.seed);
-    return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3);
+    std::size_t h5 = std::hash<bool>{}(ik.isScaleArgument);
+    return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3) ^ (h5 << 4);
   }
 };
 
@@ -68,12 +73,14 @@ TensorInitType parseTensorInitType(StringRef name) {
                   .Case("random", TensorInitType::Random)
                   .Case("normal", TensorInitType::Normal)
                   .Case("identity", TensorInitType::Identity)
+                  .Case("mixed", TensorInitType::Mixed)
                   .Case("quant", TensorInitType::Quant)
                   .Default(TensorInitType::Invalid);
   return type;
 }
 
-TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed) {
+TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed,
+                            bool isScaleArgument) {
   // Defaults for seed or not
   if (type == TensorInitType::Auto) {
     if (seed)
@@ -82,7 +89,7 @@ TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed) {
       type = TensorInitType::Constant;
   }
 
-  InitKey key(type, elmType, seed);
+  InitKey key(type, elmType, seed, isScaleArgument);
   if (tensorInitializers.find(key) != tensorInitializers.end())
     return tensorInitializers[key];
 
@@ -127,19 +134,35 @@ TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed) {
     case TensorInitType::Identity:
       initPtr = std::make_shared<IdentityTensorInitInt>(dataType);
       break;
+    case TensorInitType::Mixed:
+      initPtr = std::make_shared<QuantTensorInitInt>(dataType, seed, nullptr,
+                                                     nullptr);
+      break;
     case TensorInitType::Quant: {
-      // Create a float initializer for the rescale values while creating
-      // the int initializer for the quantized argument and corresponding
-      // rescale factor.
+      // Create a float initializer for the dequant scale factors to do
+      // the initialization for the quantized argument and corresponding
+      // dequant scale factors.
       assert(seed && "Can't call random initializers without seed");
-      auto scaleDataType = TensorInitFloat::DataType::FP32;
-      auto floatInit =
-          std::make_shared<QuantScaleTensorInitFloat>(scaleDataType, seed);
-      initPtr = std::make_shared<QuantTensorInitInt>(dataType, seed, floatInit);
-      // Store the float initializer for rescale value into hash.
-      InitKey keyScaleFloat(type, mlir::Float32Type::get(elmType.getContext()),
-                            seed);
-      tensorInitializers[keyScaleFloat] = floatInit;
+      auto floatScaleDataType = TensorInitFloat::DataType::FP32;
+      auto f8ScaleDataType = TensorInitFloat::DataType::F8E8M0FNU;
+      TensorInitPtr floatScaleInit =
+          std::make_shared<QuantScaleTensorInitFloat>(floatScaleDataType, seed);
+      TensorInitPtr f8ScaleInit =
+          std::make_shared<QuantScaleTensorInitF8e8m0>(f8ScaleDataType, seed);
+      if (!isScaleArgument) {
+        initPtr = std::make_shared<QuantTensorInitInt>(
+            dataType, seed, floatScaleInit, f8ScaleInit);
+        // Store the float/int initializer for dequant scale factors into hash.
+        InitKey keyFloatScale(
+            type, mlir::Float32Type::get(elmType.getContext()), seed, true);
+        tensorInitializers[keyFloatScale] = floatScaleInit;
+        InitKey keyF8Scale(type,
+                           mlir::Float8E8M0FNUType::get(elmType.getContext()),
+                           seed, true);
+        tensorInitializers[keyF8Scale] = f8ScaleInit;
+      } else {
+        initPtr = elmType.isF32() ? floatScaleInit : f8ScaleInit;
+      }
       break;
     }
     default:
@@ -153,7 +176,8 @@ TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed) {
   return initPtr;
 }
 
-TensorInitPtr getTensorInit(StringRef type, mlir::Type elmType, int seed) {
+TensorInitPtr getTensorInit(StringRef type, mlir::Type elmType, int seed,
+                            bool isScaleArgument) {
   auto initType = parseTensorInitType(type);
-  return getTensorInit(initType, elmType, seed);
+  return getTensorInit(initType, elmType, seed, isScaleArgument);
 }

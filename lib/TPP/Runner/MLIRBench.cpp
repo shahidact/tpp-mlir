@@ -29,12 +29,14 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dialect.h"
+#include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/InitAllDialects.h"
 #include "mlir/InitAllPasses.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LLVM.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -240,12 +242,15 @@ LogicalResult MLIRBench::createKernelArgs() {
       argInitType = TensorInitType::Normal;
     }
 
+    // Scale arguments are paired with corresponding input and weight matrices.
+    bool isScaleArgument =
+        argInitType == TensorInitType::Quant && (argNum == 1 || argNum == 3);
     auto arg =
         TypeSwitch<Type, std::optional<Value>>(ty)
             .Case<MemRefType>([&](auto memRefTy) {
               // Create a memref global
               Value data = createDenseMemref(builder, module, argInitType,
-                                             memRefTy, seed);
+                                             memRefTy, seed, isScaleArgument);
               data = registerOnGpu(data, memRefTy);
               return data;
             })
@@ -257,7 +262,7 @@ LogicalResult MLIRBench::createKernelArgs() {
               auto memrefType = MemRefType::get(tensorTy.getShape(),
                                                 tensorTy.getElementType());
               auto data = createDenseMemref(builder, module, argInitType,
-                                            memrefType, seed);
+                                            memrefType, seed, isScaleArgument);
               data = registerOnGpu(data, memrefType);
               return bufferization::ToTensorOp::create(builder,
                   unkLoc, tensorTy, data, /*restrict=*/true, /*writable=*/true);
@@ -266,8 +271,8 @@ LogicalResult MLIRBench::createKernelArgs() {
 
     if (!arg)
       return module.emitError("Cannot create kernel argument");
-
-    kernelArgs.push_back(*arg);
+    kernelArgs.push_back({*arg, isScaleArgument ? KernelArg::Kind::SCALE
+                                                : KernelArg::Kind::DATA});
     argNum++;
   }
 
@@ -288,7 +293,10 @@ LogicalResult MLIRBench::createMainWrapper() {
 
 Operation *MLIRBench::callKernel() {
   // Call the kernel
-  return func::CallOp::create(builder, unkLoc, kernel, kernelArgs);
+  SmallVector<Value> args;
+  for (auto &arg : kernelArgs)
+    args.push_back(arg.value);
+  return func::CallOp::create(builder, unkLoc, kernel, args);
 }
 
 Value MLIRBench::createTimerLoop(unsigned iters) {

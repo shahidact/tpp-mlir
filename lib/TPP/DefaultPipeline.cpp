@@ -200,7 +200,9 @@ private:
     if (defParallel)
       pm.addPass(createConvertSCFToOpenMPPass());
     pm.addPass(createConvertVectorToSCFPass());
-    pm.addPass(arith::createArithExpandOpsPass());
+    mlir::arith::ArithExpandOpsPassOptions arithExpandOpsOptions;
+    arithExpandOpsOptions.includeF8E8M0 = true;
+    pm.addPass(arith::createArithExpandOpsPass(arithExpandOpsOptions));
     pm.addPass(createLowerAffinePass());
 
     // Print IR of optimized kernel and main
