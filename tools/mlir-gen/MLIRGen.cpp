@@ -20,6 +20,7 @@
 #include "MLIRGen.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 // #include "mlir/IR/Value.h"
+#include "llvm/IR/FMF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -167,7 +168,7 @@ MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
 
   auto scaleTypeOpt = llvm::StringSwitch<std::optional<Type>>(scaleType)
                           .CaseLower("f32", builder.getF32Type())
-                          .CaseLower("i8", builder.getIntegerType(8))
+                          .CaseLower("f8E8M0FNU", builder.getF8E8M0Type())
                           .CaseLower("", builder.getF32Type())
                           .Default(std::nullopt);
   assert(scaleTypeOpt && "Unsupported scale type");
@@ -921,67 +922,44 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
   }
 
   auto result =
-      builder
-          .create<linalg::GenericOp>(
-              loc, TypeRange{outputShapedTy},
-              ValueRange{chain, inputScale, weightScale}, ValueRange{output},
-              reshapeMap, iteratorTypes,
-              [&](OpBuilder &nestedBuilder, Location nestedLoc,
-                  ValueRange blockArgs) {
-                auto arg0 = blockArgs[0];
-                auto arg1 = blockArgs[1];
-                auto arg2 = blockArgs[2];
+      linalg::GenericOp::create(
+          builder, loc, TypeRange{outputShapedTy},
+          ValueRange{chain, inputScale, weightScale}, ValueRange{output},
+          reshapeMap, iteratorTypes,
+          [&](OpBuilder &nestedBuilder, Location nestedLoc,
+              ValueRange blockArgs) {
+            auto arg0 = blockArgs[0];
+            auto arg1 = blockArgs[1];
+            auto arg2 = blockArgs[2];
 
-                // For interger scales, we need to convert the int8 scales to
-                // float scales before computing the resultant scale by
-                // multiplying the two scales.
-                auto convertInt8ToFloat = [&](OpBuilder &nestedBuilder,
-                                              Location nestedLoc,
-                                              Value arg0) -> Value {
-                  auto int32Ty = builder.getIntegerType(32);
-                  auto floatTy = builder.getF32Type();
-                  auto extScale = nestedBuilder.create<arith::ExtSIOp>(
-                      nestedLoc, int32Ty, arg0);
-                  auto leftShiftVal =
-                      builder.create<arith::ConstantIntOp>(nestedLoc, 23, 32);
-                  auto shifted = nestedBuilder.create<arith::ShLIOp>(
-                      nestedLoc, extScale, leftShiftVal);
-                  auto bitcasted = nestedBuilder.create<arith::BitcastOp>(
-                      nestedLoc, floatTy, shifted);
-                  return bitcasted;
-                };
-
-                if (dataTypes[2].isInteger(8)) {
-                  arg1 = convertInt8ToFloat(nestedBuilder, loc, arg1);
-                  arg2 = convertInt8ToFloat(nestedBuilder, loc, arg2);
-                }
-                auto alu = nestedBuilder.create<arith::MulFOp>(loc, arg1, arg2)
-                               .getResult();
-                Value castToFloat = arg0;
-                auto chainElemType = arg0.getType();
-                if (chainElemType.isF16() || chainElemType.isBF16()) {
-                  castToFloat = nestedBuilder.create<arith::ExtFOp>(
-                      loc, outputShapedTy.getElementType(), arg0);
-                } else if (chainElemType.isInteger(32)) {
-                  castToFloat = nestedBuilder.create<arith::SIToFPOp>(
-                      loc, outputShapedTy.getElementType(), arg0);
-                }
-                alu = nestedBuilder.create<arith::MulFOp>(loc, castToFloat, alu)
-                          .getResult();
-                if (arg0.getType() != dataTypes[2]) {
-                  if (arg0.getType().isF16() || arg0.getType().isBF16()) {
-                    castToFloat = arith::ExtFOp::create(nestedBuilder, loc,
-                                                        dataTypes[2], arg0);
-                  } else {
-                    castToFloat = arith::SIToFPOp::create(nestedBuilder, loc,
-                                                          dataTypes[2], arg0);
-                  }
-                }
-                alu =
-                    arith::MulFOp::create(nestedBuilder, loc, castToFloat, alu)
-                        .getResult();
-                linalg::YieldOp::create(nestedBuilder, loc, ValueRange{alu});
-              })
+            // For int8(f8E8M0FNU) scales, we need to convert the int8 scales to
+            // float scales before computing the resultant scale by
+            // multiplying the two scales.
+            auto floatTy = builder.getF32Type();
+            if (dataTypes[2].isFloat(8)) {
+              arith::FastMathFlags fmf = arith::FastMathFlags::nnan;
+              arg1 = arith::ExtFOp::create(
+                  nestedBuilder, nestedLoc, floatTy, arg1,
+                  arith::FastMathFlagsAttr::get(&context, fmf));
+              arg2 = arith::ExtFOp::create(
+                  nestedBuilder, nestedLoc, floatTy, arg2,
+                  arith::FastMathFlagsAttr::get(&context, fmf));
+            }
+            Value alu = arith::MulFOp::create(nestedBuilder, loc, arg1, arg2)
+                            ->getResult(0);
+            Value castToFloat = arg0;
+            auto chainElemType = arg0.getType();
+            if (chainElemType.isF16() || chainElemType.isBF16()) {
+              castToFloat = arith::ExtFOp::create(
+                  nestedBuilder, loc, outputShapedTy.getElementType(), arg0);
+            } else if (chainElemType.isInteger(32)) {
+              castToFloat = arith::SIToFPOp::create(
+                  nestedBuilder, loc, outputShapedTy.getElementType(), arg0);
+            }
+            alu = arith::MulFOp::create(nestedBuilder, loc, castToFloat, alu)
+                      ->getResult(0);
+            linalg::YieldOp::create(nestedBuilder, loc, ValueRange{alu});
+          })
           .getResult(0);
 
   // TODO: A place holder for flops computation for dequantization.
