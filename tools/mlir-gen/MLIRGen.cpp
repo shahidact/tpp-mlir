@@ -87,6 +87,29 @@ static Value createExpandedScaleTensor(OpBuilder &builder, Location loc,
   return scale;
 }
 
+static Value createCastToType(OpBuilder &nestedBuilder, Location nestedLoc,
+                              Value value, mlir::Type targetType) {
+  // TODO: Add support for more target types if needed.
+  assert(targetType.isFloat() && "Unsupported target type for cast");
+
+  auto valueElementType = value.getType();
+  if (valueElementType.isF32())
+    return value;
+
+  Value castToFloat = value;
+  // Cast value to float if element types differ
+  if (valueElementType != targetType) {
+    if (valueElementType.isInteger()) {
+      castToFloat =
+          arith::SIToFPOp::create(nestedBuilder, nestedLoc, targetType, value);
+    } else if (valueElementType.isFloat()) {
+      castToFloat =
+          arith::ExtFOp::create(nestedBuilder, nestedLoc, targetType, value);
+    }
+  }
+  return castToFloat;
+}
+
 } // anonymous namespace
 
 MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
@@ -936,7 +959,9 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
             // float scales before computing the resultant scale by
             // multiplying the two scales.
             auto floatTy = builder.getF32Type();
-            if (dataTypes[2].isFloat(8)) {
+            bool isNarrowFloatType = dataTypes[2].isFloat() &&
+                                     dataTypes[2].getIntOrFloatBitWidth() < 32;
+            if (isNarrowFloatType) {
               arith::FastMathFlags fmf = arith::FastMathFlags::nnan;
               arg1 = arith::ExtFOp::create(
                   nestedBuilder, nestedLoc, floatTy, arg1,
@@ -947,15 +972,9 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
             }
             Value alu = arith::MulFOp::create(nestedBuilder, loc, arg1, arg2)
                             ->getResult(0);
-            Value castToFloat = arg0;
-            auto chainElemType = arg0.getType();
-            if (chainElemType.isF16() || chainElemType.isBF16()) {
-              castToFloat = arith::ExtFOp::create(
-                  nestedBuilder, loc, outputShapedTy.getElementType(), arg0);
-            } else if (chainElemType.isInteger(32)) {
-              castToFloat = arith::SIToFPOp::create(
-                  nestedBuilder, loc, outputShapedTy.getElementType(), arg0);
-            }
+            Value castToFloat =
+                createCastToType(nestedBuilder, nestedLoc, arg0,
+                                 outputShapedTy.getElementType());
             alu = arith::MulFOp::create(nestedBuilder, loc, castToFloat, alu)
                       ->getResult(0);
             linalg::YieldOp::create(nestedBuilder, loc, ValueRange{alu});
