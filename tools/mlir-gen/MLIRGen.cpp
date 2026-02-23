@@ -88,7 +88,8 @@ static Value createExpandedScaleTensor(OpBuilder &builder, Location loc,
 }
 
 static Value createCastToType(OpBuilder &builder, Location loc, Value value,
-                              mlir::Type dstType) {
+                              mlir::Type dstType,
+                              arith::FastMathFlagsAttr fmf = nullptr) {
   assert(dstType.isFloat() && "Unsupported target type for cast");
 
   auto srcType = value.getType();
@@ -103,7 +104,7 @@ static Value createCastToType(OpBuilder &builder, Location loc, Value value,
   if (srcType.isInteger()) {
     castToFloat = arith::SIToFPOp::create(builder, loc, dstType, value);
   } else if (srctypeSize < dstTypeSize) {
-    castToFloat = arith::ExtFOp::create(builder, loc, dstType, value);
+    castToFloat = arith::ExtFOp::create(builder, loc, dstType, value, fmf);
   } else {
     castToFloat = arith::TruncFOp::create(builder, loc, dstType, value);
   }
@@ -962,15 +963,15 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
             auto floatTy = builder.getF32Type();
             bool isNarrowFloatType = dataTypes[2].isFloat() &&
                                      dataTypes[2].getIntOrFloatBitWidth() < 32;
-            if (isNarrowFloatType) {
-              arith::FastMathFlags fmf = arith::FastMathFlags::nnan;
-              arg1 = arith::ExtFOp::create(
-                  nestedBuilder, nestedLoc, floatTy, arg1,
-                  arith::FastMathFlagsAttr::get(&context, fmf));
-              arg2 = arith::ExtFOp::create(
-                  nestedBuilder, nestedLoc, floatTy, arg2,
-                  arith::FastMathFlagsAttr::get(&context, fmf));
-            }
+            arith::FastMathFlags fmf = isNarrowFloatType
+                                           ? arith::FastMathFlags::nnan
+                                           : arith::FastMathFlags::none;
+            arg1 =
+                createCastToType(nestedBuilder, nestedLoc, arg1, floatTy,
+                                 arith::FastMathFlagsAttr::get(&context, fmf));
+            arg2 =
+                createCastToType(nestedBuilder, nestedLoc, arg2, floatTy,
+                                 arith::FastMathFlagsAttr::get(&context, fmf));
             Value alu = arith::MulFOp::create(nestedBuilder, loc, arg1, arg2)
                             ->getResult(0);
             Value castToFloat =
