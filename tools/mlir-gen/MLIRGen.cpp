@@ -87,26 +87,27 @@ static Value createExpandedScaleTensor(OpBuilder &builder, Location loc,
   return scale;
 }
 
-static Value createCastToType(OpBuilder &nestedBuilder, Location nestedLoc,
-                              Value value, mlir::Type targetType) {
-  // TODO: Add support for more target types if needed.
-  assert(targetType.isFloat() && "Unsupported target type for cast");
+static Value createCastToType(OpBuilder &builder, Location loc, Value value,
+                              mlir::Type dstType) {
+  assert(dstType.isFloat() && "Unsupported target type for cast");
 
-  auto valueElementType = value.getType();
-  if (valueElementType.isF32())
+  auto srcType = value.getType();
+  if (srcType == dstType)
     return value;
+
+  auto srctypeSize = srcType.getIntOrFloatBitWidth();
+  auto dstTypeSize = dstType.getIntOrFloatBitWidth();
 
   Value castToFloat = value;
   // Cast value to float if element types differ
-  if (valueElementType != targetType) {
-    if (valueElementType.isInteger()) {
-      castToFloat =
-          arith::SIToFPOp::create(nestedBuilder, nestedLoc, targetType, value);
-    } else if (valueElementType.isFloat()) {
-      castToFloat =
-          arith::ExtFOp::create(nestedBuilder, nestedLoc, targetType, value);
-    }
+  if (srcType.isInteger()) {
+    castToFloat = arith::SIToFPOp::create(builder, loc, dstType, value);
+  } else if (srctypeSize < dstTypeSize) {
+    castToFloat = arith::ExtFOp::create(builder, loc, dstType, value);
+  } else {
+    castToFloat = arith::TruncFOp::create(builder, loc, dstType, value);
   }
+
   return castToFloat;
 }
 
