@@ -20,6 +20,7 @@
 #include "MLIRGen.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 // #include "mlir/IR/Value.h"
+#include "llvm/IR/FMF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -84,6 +85,31 @@ static Value createExpandedScaleTensor(OpBuilder &builder, Location loc,
   scale = tensor::ExpandShapeOp::create(builder, loc, packedScaleTy, scale,
                                                 reassociationIndices);
   return scale;
+}
+
+static Value createCastToType(OpBuilder &builder, Location loc, Value value,
+                              mlir::Type dstType,
+                              arith::FastMathFlagsAttr fmf = nullptr) {
+  assert(dstType.isFloat() && "Unsupported target type for cast");
+
+  auto srcType = value.getType();
+  if (srcType == dstType)
+    return value;
+
+  auto srctypeSize = srcType.getIntOrFloatBitWidth();
+  auto dstTypeSize = dstType.getIntOrFloatBitWidth();
+
+  Value castToFloat = value;
+  // Cast value to float if element types differ
+  if (srcType.isInteger()) {
+    castToFloat = arith::SIToFPOp::create(builder, loc, dstType, value);
+  } else if (srctypeSize < dstTypeSize) {
+    castToFloat = arith::ExtFOp::create(builder, loc, dstType, value, fmf);
+  } else {
+    castToFloat = arith::TruncFOp::create(builder, loc, dstType, value);
+  }
+
+  return castToFloat;
 }
 
 } // anonymous namespace
@@ -167,7 +193,7 @@ MLIRGenerator::MLIRGenerator(StringRef outputOpKindStr, StringRef kernelStr,
 
   auto scaleTypeOpt = llvm::StringSwitch<std::optional<Type>>(scaleType)
                           .CaseLower("f32", builder.getF32Type())
-                          .CaseLower("i32", builder.getI32Type())
+                          .CaseLower("f8E8M0FNU", builder.getF8E8M0Type())
                           .CaseLower("", builder.getF32Type())
                           .Default(std::nullopt);
   assert(scaleTypeOpt && "Unsupported scale type");
@@ -876,19 +902,45 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
         createExpandedScaleTensor(builder, loc, inputScale, tiles, true);
     weightScale =
         createExpandedScaleTensor(builder, loc, weightScale, tiles, false);
+
     // Update the reshape map to broadcast the unit dims for the expanded scale
     // tensors.
-    SmallVector<AffineExpr> scaleAffineExprs;
-    auto dim = 0;
-    for (auto i : cast<ShapedType>(inputScale.getType()).getShape()) {
-      scaleAffineExprs.push_back(i == 1 ? getAffineConstantExpr(0, &context)
-                                        : getAffineDimExpr(dim, &context));
-      dim++;
-    }
-    AffineMap packedScaleMap =
-        AffineMap::get(outputShapedTy.getRank(), 0, scaleAffineExprs, &context);
-    reshapeMap[1] = packedScaleMap;
-    reshapeMap[2] = packedScaleMap;
+    SmallVector<AffineExpr> inputScaleAffineExprs;
+    SmallVector<AffineExpr> weightScaleAffineExprs;
+
+    // Infer the affine expressions for input and weight scales based on the
+    // output shape and the scale shapes.
+    auto inputScaleShape = cast<ShapedType>(inputScale.getType()).getShape();
+    auto weightScaleShape = cast<ShapedType>(weightScale.getType()).getShape();
+    auto outputShape = cast<ShapedType>(outputShapedTy).getShape();
+
+    // Map scale dimensions to output dimensions
+    auto createScaleAffineExprs = [&](ArrayRef<int64_t> scaleShape) {
+      SmallVector<AffineExpr> affineExprs;
+      unsigned outputDim = 0;
+      for (auto size : scaleShape) {
+        if (size == 1) {
+          affineExprs.push_back(getAffineConstantExpr(0, &context));
+        } else {
+          // Find matching dimension in output shape
+          while (outputDim < outputShape.size() &&
+                 outputShape[outputDim] != size)
+            outputDim++;
+          affineExprs.push_back(getAffineDimExpr(outputDim, &context));
+          outputDim++;
+        }
+      }
+      return affineExprs;
+    };
+
+    inputScaleAffineExprs = createScaleAffineExprs(inputScaleShape);
+    weightScaleAffineExprs = createScaleAffineExprs(weightScaleShape);
+    AffineMap packedInputScaleMap = AffineMap::get(
+        outputShapedTy.getRank(), 0, inputScaleAffineExprs, &context);
+    AffineMap packedWeightScaleMap = AffineMap::get(
+        outputShapedTy.getRank(), 0, weightScaleAffineExprs, &context);
+    reshapeMap[1] = packedInputScaleMap;
+    reshapeMap[2] = packedWeightScaleMap;
     iteratorTypes = {
         utils::IteratorType::parallel, utils::IteratorType::parallel,
         utils::IteratorType::parallel, utils::IteratorType::parallel};
@@ -904,24 +956,29 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
             auto arg0 = blockArgs[0];
             auto arg1 = blockArgs[1];
             auto arg2 = blockArgs[2];
-            auto alu =
-                inputScaleTy.getElementType().isInteger()
-                    ? arith::MulIOp::create(nestedBuilder, loc, arg1, arg2)
-                          .getResult()
-                    : arith::MulFOp::create(nestedBuilder, loc, arg1, arg2)
-                          .getResult();
-            Value castToFloat = arg0;
-            if (arg0.getType() != dataTypes[2]) {
-              if (arg0.getType().isF16() || arg0.getType().isBF16()) {
-                castToFloat = arith::ExtFOp::create(nestedBuilder, loc,
-                                                    dataTypes[2], arg0);
-              } else {
-                castToFloat = arith::SIToFPOp::create(nestedBuilder, loc,
-                                                      dataTypes[2], arg0);
-              }
-            }
+
+            // For int8(f8E8M0FNU) scales, we need to convert the int8 scales to
+            // float scales before computing the resultant scale by
+            // multiplying the two scales.
+            auto floatTy = builder.getF32Type();
+            bool isNarrowFloatType = dataTypes[2].isFloat() &&
+                                     dataTypes[2].getIntOrFloatBitWidth() < 32;
+            arith::FastMathFlags fmf = isNarrowFloatType
+                                           ? arith::FastMathFlags::nnan
+                                           : arith::FastMathFlags::none;
+            arg1 =
+                createCastToType(nestedBuilder, nestedLoc, arg1, floatTy,
+                                 arith::FastMathFlagsAttr::get(&context, fmf));
+            arg2 =
+                createCastToType(nestedBuilder, nestedLoc, arg2, floatTy,
+                                 arith::FastMathFlagsAttr::get(&context, fmf));
+            Value alu = arith::MulFOp::create(nestedBuilder, loc, arg1, arg2)
+                            ->getResult(0);
+            Value castToFloat =
+                createCastToType(nestedBuilder, nestedLoc, arg0,
+                                 outputShapedTy.getElementType());
             alu = arith::MulFOp::create(nestedBuilder, loc, castToFloat, alu)
-                      .getResult();
+                      ->getResult(0);
             linalg::YieldOp::create(nestedBuilder, loc, ValueRange{alu});
           })
           .getResult(0);
