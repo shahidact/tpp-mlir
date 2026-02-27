@@ -243,7 +243,10 @@ void QuantTensorInitInt::fillData() {
     for (size_t i = 0; i < channelwiseScales.size(); i++) {
       float scale = 1.0f / static_cast<float>(channelwiseScales[i]);
       // For F8E8M0, the scale is represented as an 8-bit unsigned integer.
-      uint32_t shiftedValue = *reinterpret_cast<uint32_t *>(&scale) >> 23;
+      // Use memcpy to avoid strict-aliasing violation in GCC build
+      uint32_t shiftedValue;
+      std::memcpy(&shiftedValue, &scale, sizeof(uint32_t));
+      shiftedValue = shiftedValue >> 23;
       llvm::APInt intScale(bitWidth, shiftedValue, false);
       f8DequantizeScales.emplace_back(
           llvm::APFloat(llvm::APFloat::Float8E8M0FNU(), intScale));
