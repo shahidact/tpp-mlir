@@ -251,7 +251,7 @@ void QuantTensorInitInt::fillData() {
       f8DequantizeScales.emplace_back(
           llvm::APFloat(llvm::APFloat::Float8E8M0FNU(), intScale));
     }
-    static_cast<QuantScaleTensorInitF8e8m0 *>(f8e8m0ScaleInit.get())
+    static_cast<QuantScaleTensorInitFloat *>(f8e8m0ScaleInit.get())
         ->setScaleBuffer(f8DequantizeScales);
   }
 

@@ -148,7 +148,7 @@ TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed,
       TensorInitPtr floatScaleInit =
           std::make_shared<QuantScaleTensorInitFloat>(floatScaleDataType, seed);
       TensorInitPtr f8ScaleInit =
-          std::make_shared<QuantScaleTensorInitF8e8m0>(f8ScaleDataType, seed);
+          std::make_shared<QuantScaleTensorInitFloat>(f8ScaleDataType, seed);
       if (!isScaleArgument) {
         initPtr = std::make_shared<QuantTensorInitInt>(
             dataType, seed, floatScaleInit, f8ScaleInit);

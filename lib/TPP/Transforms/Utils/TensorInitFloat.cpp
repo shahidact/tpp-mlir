@@ -102,10 +102,3 @@ void QuantScaleTensorInitFloat::fillData() {
     push(scaleBuffer[i]);
   }
 }
-
-void QuantScaleTensorInitF8e8m0::fillData() {
-  assert(scaleBufferf8.size() > 0 && "scaleBuffer is empty");
-  for (size_t i = 0; i < scaleBufferf8.size(); i++) {
-    push(scaleBufferf8[i]);
-  }
-}

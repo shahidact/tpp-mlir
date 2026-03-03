@@ -188,27 +188,4 @@ private:
   std::normal_distribution<float> distribution;
 };
 
-struct QuantScaleTensorInitF8e8m0 : TensorInitFloat {
-  QuantScaleTensorInitF8e8m0(DataType type, int seed)
-      : TensorInitFloat(type), generator(seed), distribution(0.0, 0.2) {}
-
-  // Method to set scale buffer.
-  void setScaleBuffer(const std::vector<llvm::APFloat> &newBuffer) {
-    scaleBufferf8 = newBuffer;
-  }
-
-  // Should not be called.
-  float next() { assert(false && "Should not be called"); }
-  // Update internal buffer with dequant scale factors.
-  void fillData() override;
-
-private:
-  // Scale buffer corresponding to quantized arguments.
-  std::vector<llvm::APFloat> scaleBufferf8;
-  // Random generator.
-  std::default_random_engine generator;
-  // Random distribution.
-  std::normal_distribution<float> distribution;
-};
-
 #endif // TPP_TRANSFORMS_UTILS_TENSORINITFLOAT_H
