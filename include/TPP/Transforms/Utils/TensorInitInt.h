@@ -152,13 +152,14 @@ struct IdentityTensorInitInt : TensorInitInt {
 struct QuantScaleTensorInitFloat;
 // Random init (normal).
 struct QuantTensorInitInt : TensorInitInt {
-  QuantTensorInitInt(DataType type, int seed, TensorInitPtr floatScaleInit,
-                     TensorInitPtr f8e8m0ScaleInit)
-      : TensorInitInt(type), generator(seed), distribution(0.0, 0.2),
-        floatScaleInit(floatScaleInit), f8e8m0ScaleInit(f8e8m0ScaleInit) {}
+  QuantTensorInitInt(DataType type, mlir::Type scaleDataType, int seed,
+                     TensorInitPtr floatScaleInit)
+      : TensorInitInt(type), scaleDataType(scaleDataType), generator(seed),
+        distribution(0.0, 0.2), floatScaleInit(floatScaleInit) {}
 
   // Indicate which matrix it being initialized, input or weight
   bool isInputMatrix = true;
+  mlir::Type scaleDataType;
 
   // Should not be called.
   float next() { assert(false && "Should not be called"); }
@@ -180,7 +181,6 @@ private:
   // Random distribution.
   std::normal_distribution<float> distribution;
   TensorInitPtr floatScaleInit;
-  TensorInitPtr f8e8m0ScaleInit;
 };
 
 #endif // TPP_TRANSFORMS_UTILS_TENSORINITINT_H

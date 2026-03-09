@@ -138,7 +138,7 @@ LogicalResult MLIRBench::replaceSplatWithRandom() {
     if (!isTypeValid)
       return attr;
     // Generate a new random dense and return
-    auto init = getTensorInit(initType, elmTy, seed);
+    auto init = getTensorInit(initType, elmTy, nullptr, seed);
     return init->get(shape);
   };
 
@@ -220,11 +220,19 @@ LogicalResult MLIRBench::createKernelArgs() {
   builder.setInsertionPointToStart(&mainBody);
 
   int argNum = 0;
-  for (auto &ty : kernel.getArgumentTypes()) {
+  // We want to look at the next argument type for paired scale
+  // arguments.Extract the argument types from the kernel function and create an
+  // initializer for each of them based on the provided init type.
+  auto funcType = kernel.getFunctionType();
+  std::vector<Type> argTypes(funcType.getInputs().begin(),
+                             funcType.getInputs().end());
+  for (unsigned i = 0; i < argTypes.size(); i++) {
+    auto argTy = argTypes[i];
+    auto nextArgTy = (i + 1 < argTypes.size()) ? argTypes[i + 1] : nullptr;
     auto argInitType = initType;
     // Requested an argument to be identity, must be 2D square
     if (argNum == identity) {
-      ShapedType shape = dyn_cast<ShapedType>(ty);
+      ShapedType shape = dyn_cast<ShapedType>(argTy);
       if (shape && shape.getRank() == 2 &&
           shape.getDimSize(0) == shape.getDimSize(1)) {
         argInitType = TensorInitType::Identity;
@@ -246,13 +254,21 @@ LogicalResult MLIRBench::createKernelArgs() {
     bool isScaleArgument =
         argInitType == TensorInitType::Quant && (argNum == 1 || argNum == 3);
     auto arg =
-        TypeSwitch<Type, std::optional<Value>>(ty)
+        TypeSwitch<Type, std::optional<Value>>(argTy)
             .Case<MemRefType>([&](auto memRefTy) {
+              auto nextShapedType =
+                  nextArgTy ? dyn_cast<ShapedType>(nextArgTy) : nullptr;
+              auto nextMemrefType =
+                  nextShapedType
+                      ? MemRefType::get(nextShapedType.getShape(),
+                                        nextShapedType.getElementType())
+                      : nullptr;
               // Create a memref global
-              Value data = createDenseMemref(builder, module, argInitType,
-                                             memRefTy, seed, isScaleArgument);
-              data = registerOnGpu(data, memRefTy);
-              return data;
+                Value data =
+                    createDenseMemref(builder, module, argInitType, memRefTy,
+                                      seed, nextMemrefType, isScaleArgument);
+                data = registerOnGpu(data, memRefTy);
+                return data;
             })
             .Case<TensorType>([&](auto tensorTy) {
               // Create a memref global and cast it to a tensor
@@ -261,8 +277,16 @@ LogicalResult MLIRBench::createKernelArgs() {
               // allocations + copies
               auto memrefType = MemRefType::get(tensorTy.getShape(),
                                                 tensorTy.getElementType());
-              auto data = createDenseMemref(builder, module, argInitType,
-                                            memrefType, seed, isScaleArgument);
+              auto nextShapedType =
+                  nextArgTy ? dyn_cast<ShapedType>(nextArgTy) : nullptr;
+              auto nextMemrefType =
+                  nextShapedType
+                      ? MemRefType::get(nextShapedType.getShape(),
+                                        nextShapedType.getElementType())
+                      : nullptr;
+              auto data =
+                  createDenseMemref(builder, module, argInitType, memrefType,
+                                    seed, nextMemrefType, isScaleArgument);
               data = registerOnGpu(data, memrefType);
               return bufferization::ToTensorOp::create(builder,
                   unkLoc, tensorTy, data, /*restrict=*/true, /*writable=*/true);

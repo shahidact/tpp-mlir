@@ -79,7 +79,8 @@ TensorInitType parseTensorInitType(StringRef name) {
   return type;
 }
 
-TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed,
+TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType,
+                            mlir::Type nextElmType, int seed,
                             bool isScaleArgument) {
   // Defaults for seed or not
   if (type == TensorInitType::Auto) {
@@ -135,7 +136,7 @@ TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed,
       initPtr = std::make_shared<IdentityTensorInitInt>(dataType);
       break;
     case TensorInitType::Mixed:
-      initPtr = std::make_shared<QuantTensorInitInt>(dataType, seed, nullptr,
+      initPtr = std::make_shared<QuantTensorInitInt>(dataType, nullptr, seed,
                                                      nullptr);
       break;
     case TensorInitType::Quant: {
@@ -143,25 +144,16 @@ TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed,
       // the initialization for the quantized argument and corresponding
       // dequant scale factors.
       assert(seed && "Can't call random initializers without seed");
-      auto floatScaleDataType = TensorInitFloat::DataType::FP32;
-      auto f8ScaleDataType = TensorInitFloat::DataType::F8E8M0FNU;
+      auto floatScaleDataType =
+          TensorInitFloat::getTensorInitDataType(nextElmType);
       TensorInitPtr floatScaleInit =
           std::make_shared<QuantScaleTensorInitFloat>(floatScaleDataType, seed);
-      TensorInitPtr f8ScaleInit =
-          std::make_shared<QuantScaleTensorInitFloat>(f8ScaleDataType, seed);
       if (!isScaleArgument) {
-        initPtr = std::make_shared<QuantTensorInitInt>(
-            dataType, seed, floatScaleInit, f8ScaleInit);
+        initPtr = std::make_shared<QuantTensorInitInt>(dataType, nextElmType,
+                                                       seed, floatScaleInit);
         // Store the float/int initializer for dequant scale factors into hash.
-        InitKey keyFloatScale(
-            type, mlir::Float32Type::get(elmType.getContext()), seed, true);
+        InitKey keyFloatScale(type, nextElmType, seed, true);
         tensorInitializers[keyFloatScale] = floatScaleInit;
-        InitKey keyF8Scale(type,
-                           mlir::Float8E8M0FNUType::get(elmType.getContext()),
-                           seed, true);
-        tensorInitializers[keyF8Scale] = f8ScaleInit;
-      } else {
-        initPtr = elmType.isF32() ? floatScaleInit : f8ScaleInit;
       }
       break;
     }
@@ -176,8 +168,9 @@ TensorInitPtr getTensorInit(TensorInitType type, mlir::Type elmType, int seed,
   return initPtr;
 }
 
-TensorInitPtr getTensorInit(StringRef type, mlir::Type elmType, int seed,
+TensorInitPtr getTensorInit(StringRef type, mlir::Type elmType,
+                            mlir::Type nextElmType, int seed,
                             bool isScaleArgument) {
   auto initType = parseTensorInitType(type);
-  return getTensorInit(initType, elmType, seed, isScaleArgument);
+  return getTensorInit(initType, elmType, nextElmType, seed, isScaleArgument);
 }

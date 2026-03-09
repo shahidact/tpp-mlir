@@ -231,28 +231,22 @@ void QuantTensorInitInt::fillData() {
   if (floatScaleInit) {
     std::vector<llvm::APFloat> floatDequantScales;
     for (size_t i = 0; i < channelwiseScales.size(); i++) {
-      floatDequantScales.emplace_back(
-          static_cast<float>(1.0f / channelwiseScales[i]));
+      float scale = 1.0f / static_cast<float>(channelwiseScales[i]);
+      if (scaleDataType.isFloat(32))
+        floatDequantScales.emplace_back(scale);
+      else if (scaleDataType.isFloat(8)) {
+        uint32_t shiftedValue;
+        std::memcpy(&shiftedValue, &scale, sizeof(uint32_t));
+        shiftedValue = shiftedValue >> 23;
+        llvm::APInt intScale(bitWidth, shiftedValue, false);
+        floatDequantScales.emplace_back(
+            llvm::APFloat(llvm::APFloat::Float8E8M0FNU(), intScale));
+      } else {
+        llvm_unreachable("Unsupported scale data type");
+      }
     }
     static_cast<QuantScaleTensorInitFloat *>(floatScaleInit.get())
         ->setScaleBuffer(floatDequantScales);
-  }
-
-  if (f8e8m0ScaleInit) {
-    std::vector<llvm::APFloat> f8DequantizeScales;
-    for (size_t i = 0; i < channelwiseScales.size(); i++) {
-      float scale = 1.0f / static_cast<float>(channelwiseScales[i]);
-      // For F8E8M0, the scale is represented as an 8-bit unsigned integer.
-      // Use memcpy to avoid strict-aliasing violation in GCC build
-      uint32_t shiftedValue;
-      std::memcpy(&shiftedValue, &scale, sizeof(uint32_t));
-      shiftedValue = shiftedValue >> 23;
-      llvm::APInt intScale(bitWidth, shiftedValue, false);
-      f8DequantizeScales.emplace_back(
-          llvm::APFloat(llvm::APFloat::Float8E8M0FNU(), intScale));
-    }
-    static_cast<QuantScaleTensorInitFloat *>(f8e8m0ScaleInit.get())
-        ->setScaleBuffer(f8DequantizeScales);
   }
 
   // Update the matrix type to indicate next argument would be weight matrix.

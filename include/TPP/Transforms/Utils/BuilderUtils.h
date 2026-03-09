@@ -37,7 +37,7 @@ Value createDenseTensor(OpBuilder &, TensorInitType, TensorType, int);
 
 // Create a global dense memref
 Value createDenseMemref(OpBuilder &, ModuleOp, TensorInitType, MemRefType, int,
-                        bool isScaleArgument = false);
+                        MemRefType, bool isScaleArgument = false);
 
 // Return a ConstantOp of a certain type with a certain initializer
 Value getConstIndex(OpBuilder &, int);
