@@ -10,7 +10,7 @@
 #map2 = affine_map<(d0, d1, d2, d3, d4, d5, d6) -> (d0, d1, d4, d5)>
 #map3 = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #map4 = affine_map<(d0, d1, d2, d3) -> (d0, 0, d2, 0)>
-#map5 = affine_map<(d0, d1, d2, d3) -> (d1, 0, d2, 0)>
+#map5 = affine_map<(d0, d1, d2, d3) -> (d1, 0, d3, 0)>
 module {
   func.func @entry(%arg0: tensor<4x36x32x64xi8>, %arg1: tensor<128xf8E8M0FNU>, %arg2: tensor<24x36x16x32x4xi8>, %arg3: tensor<768xf8E8M0FNU>, %arg4: tensor<4x24x32x32xf32>) -> tensor<4x24x32x32xf32> {
     %c0_i32 = arith.constant 0 : i32
