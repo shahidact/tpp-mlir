@@ -275,7 +275,7 @@
 // MXI8-I8SCALE-PACKED-DEQUANT-DAG: #[[$ATTR_2:.+]] = affine_map<(d0, d1, d2, d3, d4, d5, d6) -> (d0, d1, d4, d5)>
 // MXI8-I8SCALE-PACKED-DEQUANT-DAG: #[[$ATTR_3:.+]] = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 // MXI8-I8SCALE-PACKED-DEQUANT-DAG: #[[$ATTR_4:.+]] = affine_map<(d0, d1, d2, d3) -> (d0, 0, d2, 0)>
-// MXI8-I8SCALE-PACKED-DEQUANT-DAG: #[[$ATTR_5:.+]] = affine_map<(d0, d1, d2, d3) -> (d1, 0, d2, 0)>
+// MXI8-I8SCALE-PACKED-DEQUANT-DAG: #[[$ATTR_5:.+]] = affine_map<(d0, d1, d2, d3) -> (d1, 0, d3, 0)>
 // MXI8-I8SCALE-PACKED-DEQUANT-LABEL:   func.func @entry(
 // MXI8-I8SCALE-PACKED-DEQUANT-SAME:                     %[[ARG0:.*]]: tensor<4x36x32x64xi8>,
 // MXI8-I8SCALE-PACKED-DEQUANT-SAME:                     %[[ARG1:.*]]: tensor<128xf8E8M0FNU>,
