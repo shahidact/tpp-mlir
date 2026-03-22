@@ -914,9 +914,12 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
     auto outputShape = cast<ShapedType>(outputShapedTy).getShape();
 
     // Map scale dimensions to output dimensions
-    auto createScaleAffineExprs = [&](ArrayRef<int64_t> scaleShape) {
+    auto createScaleAffineExprs = [&](ArrayRef<int64_t> scaleShape,
+                                      bool isInputScale) {
       SmallVector<AffineExpr> affineExprs;
-      unsigned outputDim = 0;
+      // Input scale maps to output dim 0, weight scale maps to output dim 1
+      unsigned outputDim = isInputScale ? 0 : 1;
+      unsigned inputDim = isInputScale ? 0 : 1;
       for (auto size : scaleShape) {
         if (size == 1) {
           affineExprs.push_back(getAffineConstantExpr(0, &context));
@@ -925,15 +928,16 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
           while (outputDim < outputShape.size() &&
                  outputShape[outputDim] != size)
             outputDim++;
-          affineExprs.push_back(getAffineDimExpr(outputDim, &context));
+          affineExprs.push_back(getAffineDimExpr(inputDim, &context));
           outputDim++;
         }
+        inputDim++;
       }
       return affineExprs;
     };
 
-    inputScaleAffineExprs = createScaleAffineExprs(inputScaleShape);
-    weightScaleAffineExprs = createScaleAffineExprs(weightScaleShape);
+    inputScaleAffineExprs = createScaleAffineExprs(inputScaleShape, true);
+    weightScaleAffineExprs = createScaleAffineExprs(weightScaleShape, false);
     AffineMap packedInputScaleMap = AffineMap::get(
         outputShapedTy.getRank(), 0, inputScaleAffineExprs, &context);
     AffineMap packedWeightScaleMap = AffineMap::get(
