@@ -5,6 +5,17 @@
 // RUN: fpcmp -r 0.001 %t.1 %t.2
 
 // IR-COUNT-4: amx.tile_muli
+// IR: scf.for
+// IR:   memref.load
+// IR:   vector.broadcast
+// IR:   arith.extf
+// IR:   scf.for
+// IR-COUNT-2:     vector.transfer_read
+// IR:     arith.extf
+// IR:     arith.mulf
+// IR:     arith.sitofp
+// IR:     arith.mulf
+// IR:     vector.transfer_write
 #map = affine_map<(d0, d1, d2, d3, d4, d5, d6) -> (d0, d2, d4, d6, d3)>
 #map1 = affine_map<(d0, d1, d2, d3, d4, d5, d6) -> (d1, d2, d6, d5, d3)>
 #map2 = affine_map<(d0, d1, d2, d3, d4, d5, d6) -> (d0, d1, d4, d5)>
