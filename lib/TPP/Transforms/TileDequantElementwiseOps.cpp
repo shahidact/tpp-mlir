@@ -60,18 +60,14 @@ bool hasValidOpPattern(linalg::GenericOp op) {
   if (op.getNumLoops() != 2)
     return false;
 
-  bool isElementWise =
-      llvm::all_of(op.getIteratorTypesArray(), [](utils::IteratorType type) {
+  if (!llvm::all_of(op.getIteratorTypesArray(), [](utils::IteratorType type) {
         return type == utils::IteratorType::parallel;
-      });
-  if (!isElementWise)
+      }))
     return false;
 
-  bool hasMulOp =
-      llvm::any_of(body.without_terminator(), [](Operation &bodyOp) {
-        return isa<arith::MulFOp, arith::MulIOp>(&bodyOp);
-      });
-  return hasMulOp;
+  return llvm::any_of(body.without_terminator(), [](Operation &bodyOp) {
+    return isa<arith::MulFOp, arith::MulIOp>(&bodyOp);
+  });
 }
 
 /// Keep info of broadcast operands in linalg.generic body. We will use this
@@ -128,24 +124,24 @@ public:
         op.getDpsInputOperand(lhsBcastOp.operandIndex));
     BlockArgument bcastBlockArg2 = op.getMatchingBlockArgument(
         op.getDpsInputOperand(rhsBcastOp.operandIndex));
-    Block &body = op.getRegion().front();
-    // Check if the users of block arguments(bcastBlockArg1 & bcastBlockArg2)
-    // are same multiplication operation.
-    bool isUserMulOp = false;
-    for (Operation &bodyOp : body.without_terminator()) {
-      if (isa<arith::MulFOp>(&bodyOp) || isa<arith::MulIOp>(&bodyOp)) {
-        if ((bodyOp.getOperand(0) == bcastBlockArg1 &&
-             bodyOp.getOperand(1) == bcastBlockArg2) ||
-            (bodyOp.getOperand(0) == bcastBlockArg2 &&
-             bodyOp.getOperand(1) == bcastBlockArg1)) {
-          isUserMulOp = true;
-        }
-      }
+    // Check broadcast block arguments(bcastBlockArg1 & bcastBlockArg2)
+    // has single user.
+    SmallVector<Value, 2> oneDimArgs = {bcastBlockArg1, bcastBlockArg2};
+    auto getSingleUser = [](Value arg) -> Operation * {
+      if (!arg.hasOneUse())
+        return nullptr;
+      return *arg.getUsers().begin();
+    };
+    for (auto arg : oneDimArgs) {
+      auto *user = getSingleUser(arg);
+      // If there are multiple users or no users, return failure.
+      if (!user)
+        return rewriter.notifyMatchFailure(
+            op, "Broadcast operand does not have single user");
+      // Unary op user must be arith::ExtFOp.
+      if (user->getNumOperands() == 1 && !isa<arith::ExtFOp>(user))
+        return rewriter.notifyMatchFailure(op, "Expected unary arith::ExtFOp");
     }
-
-    if (!isUserMulOp)
-      return rewriter.notifyMatchFailure(
-          op, "Broadcast operand user is not a multiplication operation");
 
     Location loc = op.getLoc();
     auto outputType = cast<MemRefType>(op.getDpsInits()[0].getType());
