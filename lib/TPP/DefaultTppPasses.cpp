@@ -147,6 +147,7 @@ private:
         pm.addNestedPass<func::FuncOp>(createBrgemmLinalgTiling(
             BrgemmLinalgTilingOptions{SmallVector<unsigned>{*registerBlocking}}));
         pm.addNestedPass<func::FuncOp>(createLoopInvariantCodeMotionPass());
+        pm.addNestedPass<func::FuncOp>(createTileDequantElementwiseOps());
         pm.addNestedPass<func::FuncOp>(createVectorizationPass());
 
         // Please note, canonicalizer should be after hoisting pass because
