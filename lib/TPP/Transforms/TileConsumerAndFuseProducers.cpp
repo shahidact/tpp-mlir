@@ -820,11 +820,9 @@ struct TileElementWiseOps
       }
       LogicalResult matchAndRewrite(linalg::GenericOp op,
                                     PatternRewriter &rewriter) const override {
-        if (!llvm::all_of(op.getIteratorTypesArray(), [](auto it) {
-              return linalg::isParallelIterator(it);
-            }))
+        if (!isElementwise(op))
           return rewriter.notifyMatchFailure(
-              op, "Only tiles linalg.generic with parallel iterators");
+              op, "Only tiles linalg.generic with elementwise semantics");
 
         // Exit if no non-terminating operations in the body (e.g., just a
         // yield)
@@ -834,11 +832,9 @@ struct TileElementWiseOps
               op, "No non-terminating operations in the body");
 
         auto bodyOps = body.without_terminator();
-        if (llvm::hasSingleElement(bodyOps) &&
-            isa<arith::AddFOp>(*bodyOps.begin()))
+        if (llvm::hasSingleElement(bodyOps))
           return rewriter.notifyMatchFailure(
-              op, "Dont tile linalg.generic with single addf in the body, as "
-                  "it is likely a reduction");
+              op, "Dont tile linalg.generic with single op in the body.");
 
         // Exit for Op without inputs.
         if (op.getDpsInputs().empty())
