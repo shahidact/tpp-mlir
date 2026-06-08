@@ -605,10 +605,6 @@ Value MLIRGenerator::lowerMatmul(LayerArgs &args, bool hasMixedType = false) {
       TensorType intAccumulatorType =
           RankedTensorType::get(shape, builder.getIntegerType(32));
       output = getZeroInitTensor(intAccumulatorType);
-    } else if (elementType.isBF16() || elementType.isF16()) {
-      output = getZeroInitTensor(cast<TensorType>(outputType));
-    } else {
-      llvm_unreachable("Unsupported dequantization data type");
     }
   }
 
