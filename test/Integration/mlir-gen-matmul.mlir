@@ -96,10 +96,7 @@
 // MXBF16-CONTRACT-SAME:                     %[[ARG0:.*]]: tensor<2x36x64x64xbf16>,
 // MXBF16-CONTRACT-SAME:                     %[[ARG1:.*]]: tensor<16x36x64x48xbf16>,
 // MXBF16-CONTRACT-SAME:                     %[[ARG2:.*]]: tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32> {
-// MXBF16-CONTRACT:           %[[VAL_0:.*]] = arith.constant 0.000000e+00 : f32
-// MXBF16-CONTRACT:           %[[VAL_1:.*]] = tensor.empty() : tensor<2x16x64x48xf32>
-// MXBF16-CONTRACT:           %[[VAL_2:.*]] = linalg.fill ins(%[[VAL_0]] : f32) outs(%[[VAL_1]] : tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32>
-// MXBF16-CONTRACT:           %[[VAL_3:.*]] = linalg.contract indexing_maps = [#[[$ATTR_0]], #[[$ATTR_1]], #[[$ATTR_2]]] ins(%[[ARG0]], %[[ARG1]] : tensor<2x36x64x64xbf16>, tensor<16x36x64x48xbf16>) outs(%[[VAL_2]] : tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32>
+// MXBF16-CONTRACT:           %[[VAL_3:.*]] = linalg.contract indexing_maps = [#[[$ATTR_0]], #[[$ATTR_1]], #[[$ATTR_2]]] ins(%[[ARG0]], %[[ARG1]] : tensor<2x36x64x64xbf16>, tensor<16x36x64x48xbf16>) outs(%[[ARG2]] : tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32>
 // MXBF16-CONTRACT:           return %[[VAL_3]] : tensor<2x16x64x48xf32>
 // MXBF16-CONTRACT:         }
 
@@ -142,10 +139,7 @@
 // MXF16-CONTRACT-SAME:                     %[[ARG0:.*]]: tensor<2x36x64x64xf16>,
 // MXF16-CONTRACT-SAME:                     %[[ARG1:.*]]: tensor<16x36x64x48xf16>,
 // MXF16-CONTRACT-SAME:                     %[[ARG2:.*]]: tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32> {
-// MXF16-CONTRACT:           %[[VAL_0:.*]] = arith.constant 0.000000e+00 : f32
-// MXF16-CONTRACT:           %[[VAL_1:.*]] = tensor.empty() : tensor<2x16x64x48xf32>
-// MXF16-CONTRACT:           %[[VAL_2:.*]] = linalg.fill ins(%[[VAL_0]] : f32) outs(%[[VAL_1]] : tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32>
-// MXF16-CONTRACT:           %[[VAL_3:.*]] = linalg.contract indexing_maps = [#[[$ATTR_0]], #[[$ATTR_1]], #[[$ATTR_2]]] ins(%[[ARG0]], %[[ARG1]] : tensor<2x36x64x64xf16>, tensor<16x36x64x48xf16>) outs(%[[VAL_2]] : tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32>
+// MXF16-CONTRACT:           %[[VAL_3:.*]] = linalg.contract indexing_maps = [#[[$ATTR_0]], #[[$ATTR_1]], #[[$ATTR_2]]] ins(%[[ARG0]], %[[ARG1]] : tensor<2x36x64x64xf16>, tensor<16x36x64x48xf16>) outs(%[[ARG2]] : tensor<2x16x64x48xf32>) -> tensor<2x16x64x48xf32>
 // MXF16-CONTRACT:           return %[[VAL_3]] : tensor<2x16x64x48xf32>
 // MXF16-CONTRACT:         }
 
