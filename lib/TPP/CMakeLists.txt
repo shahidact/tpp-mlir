@@ -13,6 +13,7 @@ add_mlir_library(TPPPipeline
   DefaultPipeline.cpp
   DefaultTppPasses.cpp
   LoadTppDialects.cpp
+  LowerToLLVMPipeline.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${PROJECT_SOURCE_DIR}/include/TPP

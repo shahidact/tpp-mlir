@@ -8,6 +8,7 @@ add_mlir_library(TPPTransforms
   LinalgDeGeneralize.cpp
   LowerPacksAndUnpacks.cpp
   LowerPacksAndUnpacksWithoutTranspose.cpp
+  ReplicateBuffersForBenchmark.cpp
   RewriteBatchMatmulToMatmul.cpp
   RewriteToBatchReduceGemm.cpp
   TileConsumerAndFuseProducers.cpp

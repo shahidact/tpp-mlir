@@ -51,9 +51,17 @@ template <typename T> struct TensorInit : public ITensorInit {
 
     // For some reason, memref global op needs dense tensor type
     // See: lib/Dialect/MemRef/IR/MemRefOps.cpp :: GlobalOp::verify
-    auto tensorType =
-        mlir::RankedTensorType::get(shape.getShape(), shape.getElementType());
-    return mlir::DenseElementsAttr::get(tensorType, buffer);
+    mlir::ShapedType attrType;
+    if (mlir::isa<mlir::MemRefType, mlir::TensorType>(shape)) {
+      attrType =
+          mlir::RankedTensorType::get(shape.getShape(), shape.getElementType());
+    } else {
+      // Fixes this error "'arith.constant' op failed to verify that all of
+      // {value, result} have same type" as there is no need to convert it to
+      // ranked TensorType.
+      attrType = shape;
+    }
+    return mlir::DenseElementsAttr::get(attrType, buffer);
   }
 
 protected:

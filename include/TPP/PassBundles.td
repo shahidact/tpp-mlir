@@ -251,4 +251,26 @@ def X86Vectorizer : Pass<"x86-vectorizer", "ModuleOp"> {
   ];
 }
 
+def LowerToLLVMPipeline : Pass<"lower-to-llvm-pipeline", "ModuleOp"> {
+  let summary = "Lower memref-level IR to LLVM dialect";
+  let description = [{
+    A collection of passes after DefaultTppPasses from DefaultPipeline
+    that perform partial lowering (memref expansion, linalg to loops,
+    vector to SCF, etc.) and then convert to LLVM dialect.
+
+    This modularization of pass pipeline is required for cache nuking
+    purpose only to avoid memory allocation and copies inside perf loop.
+
+    This pass is designed to run after bufferization for Cache nuking
+    to support buffer replication pass which expects the kernel function
+    arguments as memrefs allowing TppRunWrapper pass to be inserted
+    between DefaultTppPasses and this lowering pipeline.
+  }];
+  let options = [
+    Option<"enableParallel", "parallel",
+           "bool", /*default=*/"false",
+           "Enable parallel execution via OpenMP.">,
+  ];
+}
+
 #endif // TPP_DIALECT_TPP_PASSBUNDLES

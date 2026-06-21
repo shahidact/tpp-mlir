@@ -602,6 +602,33 @@ def TppRunnerWrapper : Pass<"tpp-runner-wrapper", "ModuleOp">{
   ];
 }
 
+def ReplicateBuffersForBenchmark : Pass<"replicate-buffers-benchmark", "ModuleOp"> {
+  let summary = "Replicate buffers for cold-cache benchmarking";
+  let description = [{
+    Creates multiple copies of input/output buffers to exceed L3 cache,
+    then iterates through all copies. This ensures cold-cache conditions
+    for accurate GEMM benchmarking.
+
+    The pass finds global memrefs created by TppRunnerWrapper and:
+    1. Allocates separate buffers.
+    2. Replicates the kernel calls using the separate buffers.
+
+    When numLayers=-1 (default), automatically calculates the number of
+    layers needed to reach ~5GB working set size.
+  }];
+  let dependentDialects = ["func::FuncDialect",
+                           "memref::MemRefDialect",
+                           "arith::ArithDialect"];
+  let options = [
+    Option<"numLayers", "num-layers", "int64_t",
+            /*default=*/"-1",
+           "Number of buffer copies. -1 = auto-calculate for ~5GB working set.">,
+    Option<"targetWorkingSetGB", "target-gb", "double",
+            /*default=*/"5.0",
+           "Target working set size in GB for auto-calculation.">
+  ];
+}
+
 def LinalgToXeGPU : Pass<"linalg-to-xegpu", "func::FuncOp"> {
   let summary = "Convert linalg dialect to XeGPU dialect.";
   let description = [{

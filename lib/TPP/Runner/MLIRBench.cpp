@@ -243,7 +243,8 @@ LogicalResult MLIRBench::createKernelArgs() {
 
     // For quantized kernels output arguments, make the init type normal.
     auto funcType = kernel.getFunctionType();
-    auto numOutputs = funcType.getNumResults();
+    // For memref arguments in cache-nuke path, set numOutputs to 1.
+    auto numOutputs = isa<MemRefType>(argTy) ? 1 : funcType.getNumResults();
     if (kernel.getArgumentTypes().size() - numOutputs ==
             static_cast<size_t>(argNum) &&
         argInitType == TensorInitType::Quant) {

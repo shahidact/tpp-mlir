@@ -136,6 +136,39 @@ llvm::cl::opt<bool>
                llvm::cl::desc("Kernel buffers are allocated on GPU"),
                llvm::cl::init(true));
 
+// Extern declarations for DefaultTppPasses options defined in
+// DefaultPipeline.cpp. These are needed for the cache-nuke split pipeline to
+// pass options correctly.
+extern llvm::cl::opt<bool> linalgToLoops;
+extern llvm::cl::opt<bool> sfcOrder;
+extern llvm::cl::list<unsigned> parallelTaskGrid;
+extern llvm::cl::opt<bool> linalgToVector;
+extern llvm::cl::opt<bool> vectorToXSMM;
+extern llvm::cl::opt<bool> lowerPackUnpackWithoutTranspose;
+extern llvm::cl::opt<bool> disableVnniPacking;
+extern llvm::cl::opt<bool> disableTileElementwiseOps;
+extern llvm::cl::list<unsigned> registerBlocking;
+extern llvm::cl::opt<bool> vectorToKernel;
+extern llvm::cl::opt<bool> nanoKernel;
+extern llvm::cl::opt<bool> defParallel;
+
+// Cache-nuking benchmark options for cold-cache measurements.
+llvm::cl::opt<bool> enableCacheNuking(
+    "cache-nuke",
+    llvm::cl::desc("Enable buffer replication for cold-cache benchmarking"),
+    llvm::cl::init(false));
+
+llvm::cl::opt<int64_t> cacheNukeLayers(
+    "cache-nuke-layers",
+    llvm::cl::desc(
+        "Number of buffer layers for cache-nuking (-1=auto for ~5GB)"),
+    llvm::cl::init(-1));
+
+llvm::cl::opt<double> cacheNukeTargetGB(
+    "cache-nuke-target-gb",
+    llvm::cl::desc("Target working set size in GB for auto-calculation"),
+    llvm::cl::init(5.0));
+
 struct TargetMachineOptions {
   std::string triple;
   std::string cpu;
@@ -205,11 +238,51 @@ static LogicalResult prepareMLIRKernel(Operation *op,
   wrapperOpts.seed = seed;
   wrapperOpts.initType = initType;
   wrapperOpts.identity = identity;
-  passManager.addPass(tpp::createTppRunnerWrapper(wrapperOpts));
 
-  tpp::DefaultPipelineOptions defPipelineOpts{defGpuBackend,
-                                              runnerCpuTargetFeature};
-  passManager.addPass(tpp::createDefaultPipeline(defPipelineOpts));
+  // Benchmarking with cache-nuking requires wrapper passes to run after
+  // bufferization to avoid memref.copy being inserted inside the timed region.
+  // Use split pipeline.
+  if (enableCacheNuking && benchNumLoops > 1) {
+    // Step 1: DefaultTppPasses - tensor to memref (includes bufferization)
+    // Pass all CLI options that DefaultPipeline would normally pass.
+    tpp::DefaultTppPassesOptions tppPassesOpts;
+    tppPassesOpts.linalgToLoops = linalgToLoops;
+    tppPassesOpts.sfcOrder = sfcOrder;
+    tppPassesOpts.parallelTaskGrid =
+        SmallVector<unsigned>{parallelTaskGrid.begin(), parallelTaskGrid.end()};
+    tppPassesOpts.linalgToVector = linalgToVector;
+    tppPassesOpts.vectorToXSMM = vectorToXSMM;
+    tppPassesOpts.lowerPackUnpackWithoutTranspose =
+        lowerPackUnpackWithoutTranspose;
+    tppPassesOpts.disableVnniPacking = disableVnniPacking;
+    tppPassesOpts.disableTileElementwiseOps = disableTileElementwiseOps;
+    tppPassesOpts.registerBlocking =
+        SmallVector<unsigned>{registerBlocking.begin(), registerBlocking.end()};
+    tppPassesOpts.vectorToKernel = vectorToKernel;
+    tppPassesOpts.nanoKernel = nanoKernel;
+    tppPassesOpts.defBundleCpuTargetFeature = runnerCpuTargetFeature;
+    passManager.addPass(tpp::createDefaultTppPasses(tppPassesOpts));
+
+    // Step 2: Wrapper passes - now operate on memrefs (after bufferization)
+    passManager.addPass(tpp::createTppRunnerWrapper(wrapperOpts));
+
+    tpp::ReplicateBuffersForBenchmarkOptions replicateOpts;
+    replicateOpts.numLayers = cacheNukeLayers;
+    replicateOpts.targetWorkingSetGB = cacheNukeTargetGB;
+    passManager.addPass(tpp::createReplicateBuffersForBenchmark(replicateOpts));
+
+    // Step 3: LowerToLLVMPipeline - memref to LLVM
+    tpp::LowerToLLVMPipelineOptions lowerOpts;
+    lowerOpts.enableParallel = defParallel;
+    passManager.addPass(tpp::createLowerToLLVMPipeline(lowerOpts));
+  } else {
+    // Original pipeline order when cache-nuking is not needed.
+    passManager.addPass(tpp::createTppRunnerWrapper(wrapperOpts));
+
+    tpp::DefaultPipelineOptions defPipelineOpts{defGpuBackend,
+                                                runnerCpuTargetFeature};
+    passManager.addPass(tpp::createDefaultPipeline(defPipelineOpts));
+  }
 
   auto result = passManager.run(module);
   if (failed(result)) {
