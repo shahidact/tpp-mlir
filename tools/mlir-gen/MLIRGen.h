@@ -133,6 +133,9 @@ class MLIRGenerator {
   /// Computes required flops for matmul
   void computeMatmulFlops(ShapedType inputShape, ShapedType outputShape);
 
+  /// Computes required flops for dequantization scaling.
+  void computeElementwiseScalingFlops(ShapedType outputShape);
+
   /// Computes required flops for bias/relu
   void computeBiasOrReluFlops(ShapedType outputShape);
 
