@@ -543,6 +543,19 @@ void MLIRGenerator::computeBiasOrReluFlops(ShapedType outputShape) {
   flops += addReluFlops;
 }
 
+// For dequantization, we have an elementwise scaling after gemm, so the flops
+// would be the double of number of elements in the output as it involves two
+// multiplications.
+void MLIRGenerator::computeElementwiseScalingFlops(ShapedType outputShape) {
+  int64_t scalingFlops = 1;
+  for (int i = 0, max = outputShape.getRank(); i < max; i++)
+    scalingFlops *= outputShape.getDimSize(i);
+
+  // For combining dequantization scales, we have an additional elementwise
+  // multiplication, so we count that as well.
+  flops += 2 * scalingFlops;
+}
+
 Value MLIRGenerator::lowerNamedMatmul(Value input, Value weight, Value output) {
   auto inputShape = cast<ShapedType>(input.getType());
   auto weightShape = cast<ShapedType>(weight.getType());
@@ -882,7 +895,6 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
   // Chain is the contract/gemm output
   assert(chain && "Expected valid chain output from contract/gemm operation");
 
-  Value input = args.input.value;
   Value inputScale = args.inputScale.value;
   Value weightScale = args.weightScale.value;
   Value output = args.output.value;
@@ -902,7 +914,6 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
   // Create a 2-D ouput scale shape using input and weight scales
   auto outputScaleShape = SmallVector<int64_t>{inputScaleTy.getShape()[0],
                                                weightScaleTy.getShape()[0]};
-  auto inputShapedTy = cast<ShapedType>(input.getType());
   auto outputShapedTy = cast<ShapedType>(output.getType());
 
   // Create map for outerproduct of input and weight scales
@@ -1012,8 +1023,9 @@ Value MLIRGenerator::dequantizeGemm(LayerArgs &args, Value chain) {
           })
           .getResult(0);
 
-  // TODO: A place holder for flops computation for dequantization.
-  computeMatmulFlops(inputShapedTy, outputShapedTy);
+  // Compute flop for dequantization by combining scales and then applying the
+  // combined scale on output of gemm.
+  computeElementwiseScalingFlops(outputShapedTy);
   return result;
 }
 
