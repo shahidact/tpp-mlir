@@ -69,7 +69,6 @@ jobs:
   TPP-MLIR-ZEN-BASE:
     runs-on: pcl-tiergarten
     if: |
-      (github.event_name == 'push') || 
       (github.event_name == 'workflow_dispatch' && inputs.RUN_ZEN_BENCH) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark-full'))
     needs: Check_LLVM
@@ -84,7 +83,6 @@ jobs:
   TPP-MLIR-ZEN-OMP:
     runs-on: pcl-tiergarten
     if: |
-      (github.event_name == 'push') || 
       (github.event_name == 'workflow_dispatch' && inputs.RUN_ZEN_BENCH) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark-full'))
     needs: Check_LLVM
