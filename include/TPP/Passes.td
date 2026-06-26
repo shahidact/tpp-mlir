@@ -392,6 +392,47 @@ def Bufferize : Pass<"bufferize", "ModuleOp"> {
   ];
 }
 
+def ReplicateBenchArgs : Pass<"replicate-bench-args", "ModuleOp"> {
+  let summary = "Replicate benchmark kernel arguments for cold-cache timing";
+  let description = [{
+    Operates after bufferization on the benchmark wrapper produced by tpp-run.
+    For each `perf.bench` region, the (single) kernel call is wrapped in an
+    `scf.for` loop that iterates over a new "replica" dimension. Each kernel
+    argument is backed by a flat, zero-initialized `i8` global holding
+    `replication-factor` contiguous copies of the argument; every iteration
+    feeds the kernel a distinct `memref.view` into that buffer (pure pointer
+    arithmetic, no allocation or copy). `memref.view` is used instead of
+    `memref.subview` so that each replica keeps the original identity layout and
+    zero offset, which avoids breaking layout-sensitive ops in the kernel (such
+    as the `memref.expand_shape` introduced by bf16 VNNI packing). This mirrors
+    the "n_layers" replication used by libxsmm's cold-cache GEMM benchmark: the
+    same problem is run on different memory so the caches stay cold.
+
+    The replication factor is taken from the `replication-factor` option when
+    positive, otherwise from the `tpp.bench_replication_factor` module attribute
+    set by the benchmark producer. A factor <= 1 disables the pass.
+
+    Each float buffer is filled once, before any timed region. By default it is
+    filled with the constant 1.0; when the `random-init` option or the
+    `tpp.bench_replication_random_init` module attribute is set, it is instead
+    filled with PRNG-generated values in [1, 2). Neither default is zero, which
+    avoids the unrealistically high clock that the FMA units reach when fed
+    all-zero inputs.
+  }];
+  let options = [
+    Option<"replicationFactor", "replication-factor", "int64_t",
+           /*default=*/"0",
+           "Number of replicas (0 = read from module attribute).">,
+    Option<"randomInit", "random-init", "bool",
+           /*default=*/"false",
+           "Initialize the replicated float buffers at runtime with random "
+           "floating-point values in [1, 2) instead of the constant 1.0.">,
+  ];
+  let dependentDialects = ["memref::MemRefDialect",
+                           "scf::SCFDialect",
+                           "func::FuncDialect"];
+}
+
 def DuplicateFill : Pass<"duplicate-fill", "func::FuncOp"> {
   let summary = "Duplicate fill operations";
   let description = [{
@@ -600,6 +641,12 @@ def TppRunnerWrapper : Pass<"tpp-runner-wrapper", "ModuleOp">{
     Option<"identity", "identity", "int64_t",
             /*default=*/"-1",
            "Identity square argument (-1=none, 0=a, 1=b, ...).">,
+    Option<"benchReplicationGiB", "bench-replication-gb", "double",
+            /*default=*/"0.0",
+           "Replicate kernel tensor arguments along a new outer dimension so "
+           "that their overall memory footprint reaches the given size in GiB, "
+           "and iterate over the replicas inside the timing loop to benchmark "
+           "out of cold caches (0 = disabled).">,
   ];
 }
 
