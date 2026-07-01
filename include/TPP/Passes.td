@@ -424,7 +424,7 @@ def ReplicateBenchArgs : Pass<"replicate-bench-args", "ModuleOp"> {
            /*default=*/"0",
            "Number of replicas (0 = read from module attribute).">,
     Option<"randomInit", "random-init", "bool",
-           /*default=*/"false",
+           /*default=*/"true",
            "Initialize the replicated float buffers at runtime with random "
            "floating-point values in [1, 2) instead of the constant 1.0.">,
   ];
